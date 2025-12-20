@@ -17,7 +17,8 @@ import traceback
 import shutil
 
 # ========== НАСТРОЙКИ ==========
-BOT_TOKEN = "8518881565:AAEQFfOCO3gcPAnNtV25-hl_z5WzCNCouDg"
+# Обновленный токен по вашему запросу
+BOT_TOKEN = "8518881565:AAEQFfOCO3gcPAnNtV25-hl_z5WzCNCouDg" 
 ADMIN = "M1pTAHKOB"  # Убедитесь, что это ваш username (без @) или ID
 
 # Настройки проверки
@@ -92,7 +93,8 @@ class Button_URGT_Bot:
             "keyboard": [
                 [{"text": "📅 Сегодня"}, {"text": "📆 Завтра"}],
                 [{"text": "🔍 Проверить обновления"}, {"text": "⚙️ Настройки"}],
-                [{"text": "ℹ️ Помощь"}, {"text": "👤 Мой профиль"}]
+                [{"text": "ℹ️ Помощь"}, {"text": "👤 Мой профиль"}],
+                [{"text": "❤️ Поддержать автора"}]
             ],
             "resize_keyboard": True
         }
@@ -198,6 +200,8 @@ class Button_URGT_Bot:
                 self.handle_profile(chat_id, user_id)
             elif text == 'ℹ️ Помощь':
                 self.handle_help(chat_id)
+            elif text == '❤️ Поддержать автора':
+                self.handle_support(chat_id)
             elif text == '⬅️ Назад':
                 self.waiting_for_broadcast = False
                 self.send_message(chat_id, "↩️ Главное меню", self.create_main_keyboard())
@@ -208,6 +212,16 @@ class Button_URGT_Bot:
             logger.error(f"Ошибка процесса: {e}")
 
     # ========== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ==========
+
+    def handle_support(self, chat_id):
+        support_text = (
+            "❤️ *ПОДДЕРЖКА АВТОРА*\n\n"
+            "Если вам нравится этот бот и вы хотите поддержать его развитие, вы можете сделать перевод по реквизитам ниже:\n\n"
+            "💳 *Карта:* `2200 7014 1439 4772`\n"
+            "👤 *Автор:* @M1PTAHKOB\n\n"
+            "Спасибо за вашу поддержку! 🙏"
+        )
+        self.send_message(chat_id, support_text)
 
     def handle_start(self, chat_id, user_info):
         cursor = self.conn.cursor()
@@ -337,6 +351,3 @@ class Button_URGT_Bot:
 if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
-
-
-

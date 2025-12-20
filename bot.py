@@ -17,7 +17,7 @@ import traceback
 import shutil
 
 # ========== НАСТРОЙКИ ==========
-BOT_TOKEN = "8518881565:AAGGhcYZmLFCg2koS2hILcf0ImWJxpZ-KPg"
+BOT_TOKEN = "8518881565:AAEQFfOCO3gcPAnNtV25-hl_z5WzCNCouDg"
 ADMIN = "M1pTAHKOB"  # Убедитесь, что это ваш username (без @) или ID
 
 # Настройки проверки
@@ -337,5 +337,6 @@ class Button_URGT_Bot:
 if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
+
 
 

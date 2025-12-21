@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 БОТ ДЛЯ РАСПИСАНИЯ УрЖТ С КНОПОЧНЫМ МЕНЮ И РАССЫЛКОЙ
+Добавлены функции: /send ID текст и /users
 """
 
 import requests
@@ -40,7 +41,8 @@ class Button_URGT_Bot:
         self.waiting_for_broadcast = False
         
         logger.info("=" * 60)
-        logger.info("🤖 БОТ УрЖТ ЗАПУЩЕН (РЕЖИМ HTML)")
+        logger.info("🤖 БОТ УрЖТ ЗАПУЩЕН")
+        logger.info("👑 Админ-команды: /send ID текст, /users")
         logger.info("=" * 60)
     
     def init_db(self):
@@ -77,28 +79,8 @@ class Button_URGT_Bot:
             logger.error(f"❌ Ошибка БД: {e}")
             raise
 
-    def create_main_keyboard(self):
-        keyboard = {
-            "keyboard": [
-                [{"text": "📅 Сегодня"}, {"text": "📆 Завтра"}],
-                [{"text": "🔍 Проверить обновления"}, {"text": "⚙️ Настройки"}],
-                [{"text": "ℹ️ Помощь"}, {"text": "👤 Мой профиль"}],
-                [{"text": "❤️ Поддержать автора"}]
-            ],
-            "resize_keyboard": True
-        }
-        return json.dumps(keyboard)
-    
-    def create_settings_keyboard(self, is_admin=False):
-        buttons = [[{"text": "🔔 Вкл/Выкл уведомления"}]]
-        if is_admin: buttons.append([{"text": "📢 Рассылка всем"}])
-        buttons.extend([[{"text": "📊 Статистика бота"}], [{"text": "⬅️ Назад"}]])
-        return json.dumps({"keyboard": buttons, "resize_keyboard": True})
-
-    def create_back_keyboard(self):
-        return json.dumps({"keyboard": [[{"text": "⬅️ Назад"}]], "resize_keyboard": True})
-
-    def send_message(self, chat_id, text, keyboard=None, parse_mode='HTML'):
+    # ========== ОТПРАВКА ==========
+    def send_message(self, chat_id, text, keyboard=None, parse_mode='Markdown'):
         url = self.base_url + "sendMessage"
         params = {'chat_id': chat_id, 'text': text, 'parse_mode': parse_mode, 'disable_web_page_preview': True}
         if keyboard: params['reply_markup'] = keyboard
@@ -106,10 +88,14 @@ class Button_URGT_Bot:
         try:
             response = requests.post(url, params=params, timeout=15)
             if response.status_code != 200:
-                logger.error(f"⚠️ Ошибка API ({chat_id}): {response.status_code} - {response.text}")
+                # Если Markdown ломается, отправляем как обычный текст
+                if "can't parse entities" in response.text:
+                    params.pop('parse_mode')
+                    response = requests.post(url, params=params, timeout=15)
+                logger.error(f"⚠️ Ошибка отправки {chat_id}: {response.text}")
             return response.status_code == 200
         except Exception as e:
-            logger.error(f"❌ Критическая ошибка: {e}")
+            logger.error(f"❌ Ошибка запроса: {e}")
             return False
 
     def send_pdf(self, chat_id, pdf_url):
@@ -136,6 +122,27 @@ class Button_URGT_Bot:
         date_str = target_date.strftime("%d%m%Y")
         return f"https://urgt66.ru/media/sub/3656/files/raspisanie-na-{date_str}.pdf"
 
+    # ========== КЛАВИАТУРЫ ==========
+    def create_main_keyboard(self):
+        return json.dumps({
+            "keyboard": [
+                [{"text": "📅 Сегодня"}, {"text": "📆 Завтра"}],
+                [{"text": "🔍 Проверить обновления"}, {"text": "⚙️ Настройки"}],
+                [{"text": "ℹ️ Помощь"}, {"text": "👤 Мой профиль"}],
+                [{"text": "❤️ Поддержать автора"}]
+            ], "resize_keyboard": True
+        })
+
+    def create_settings_keyboard(self, is_admin=False):
+        buttons = [[{"text": "🔔 Вкл/Выкл уведомления"}]]
+        if is_admin: buttons.append([{"text": "📢 Рассылка всем"}])
+        buttons.extend([[{"text": "📊 Статистика бота"}], [{"text": "⬅️ Назад"}]])
+        return json.dumps({"keyboard": buttons, "resize_keyboard": True})
+
+    def create_back_keyboard(self):
+        return json.dumps({"keyboard": [[{"text": "⬅️ Назад"}]], "resize_keyboard": True})
+
+    # ========== ОБРАБОТЧИКИ ==========
     def process_message(self, message):
         try:
             chat_id = message['chat']['id']
@@ -144,11 +151,40 @@ class Button_URGT_Bot:
             text = message.get('text', '').strip()
             is_admin = str(user_id) == ADMIN or username == ADMIN.lstrip('@')
 
+            # КОМАНДА /users (ТОЛЬКО ДЛЯ АДМИНА)
+            if is_admin and text == '/users':
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT user_id, username, first_name FROM users")
+                users_list = cursor.fetchall()
+                if not users_list:
+                    self.send_message(chat_id, "📭 База данных пуста.")
+                else:
+                    report = "👥 *Список пользователей бота:*\n\n"
+                    for u in users_list:
+                        report += f"ID: `{u[0]}` | @{u[1] if u[1] else 'None'} | {u[2]}\n"
+                    # Если список слишком длинный, Telegram может его не принять, поэтому ограничим
+                    self.send_message(chat_id, report[:4000]) 
+                return
+
+            # КОМАНДА /send ID Текст (ТОЛЬКО ДЛЯ АДМИНА)
+            if is_admin and text.startswith('/send'):
+                parts = text.split(maxsplit=2)
+                if len(parts) == 3:
+                    target_id, msg_text = parts[1], parts[2]
+                    out_msg = f"✉️ *Личное сообщение от администратора:*\n\n{msg_text}"
+                    if self.send_message(target_id, out_msg):
+                        self.send_message(chat_id, f"✅ Доставлено пользователю `{target_id}`")
+                    else:
+                        self.send_message(chat_id, "❌ Не удалось отправить (неверный ID или блок).")
+                else:
+                    self.send_message(chat_id, "ℹ️ Формат: `/send ID Текст`")
+                return
+
             if is_admin and self.waiting_for_broadcast and text != '⬅️ Назад':
                 self.waiting_for_broadcast = False
-                self.send_message(chat_id, "🚀 <b>Запуск рассылки...</b>")
+                self.send_message(chat_id, "🚀 *Запуск рассылки...*")
                 success, failed = self.broadcast_message(text)
-                self.send_message(chat_id, f"✅ <b>Готово!</b>\nУспешно: {success}\nОшибок: {failed}", self.create_main_keyboard())
+                self.send_message(chat_id, f"✅ *Готово!*\nУспешно: {success}\nОшибок: {failed}", self.create_main_keyboard())
                 return
 
             if text in ['/start', '/старт']:
@@ -156,7 +192,7 @@ class Button_URGT_Bot:
                 cursor.execute("INSERT OR REPLACE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)",
                                (user_id, username, message['from'].get('first_name'), message['from'].get('last_name')))
                 self.conn.commit()
-                self.send_message(chat_id, "👋 <b>Бот УрЖТ готов к работе!</b>", self.create_main_keyboard())
+                self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
             elif text == '📅 Сегодня':
                 self.handle_today(chat_id)
             elif text == '📆 Завтра':
@@ -164,10 +200,10 @@ class Button_URGT_Bot:
             elif text == '🔍 Проверить обновления':
                 self.handle_check_updates(chat_id)
             elif text == '⚙️ Настройки':
-                self.send_message(chat_id, "⚙️ <b>НАСТРОЙКИ</b>", self.create_settings_keyboard(is_admin))
+                self.send_message(chat_id, "⚙️ *НАСТРОЙКИ*", self.create_settings_keyboard(is_admin))
             elif text == '📢 Рассылка всем' and is_admin:
                 self.waiting_for_broadcast = True
-                self.send_message(chat_id, "📝 <b>Введите текст сообщения для рассылки:</b>", self.create_back_keyboard())
+                self.send_message(chat_id, "📝 *Введите текст сообщения для рассылки:*", self.create_back_keyboard())
             elif text == '🔔 Вкл/Выкл уведомления':
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT notifications FROM users WHERE user_id = ?", (user_id,))
@@ -175,21 +211,21 @@ class Button_URGT_Bot:
                 new_val = 0 if res and res[0] == 1 else 1
                 cursor.execute("UPDATE users SET notifications = ? WHERE user_id = ?", (new_val, user_id))
                 self.conn.commit()
-                self.send_message(chat_id, f"🔔 Уведомления <b>{'ВКЛЮЧЕНЫ' if new_val == 1 else 'ВЫКЛЮЧЕНЫ'}</b>")
+                self.send_message(chat_id, f"🔔 Уведомления *{'ВКЛЮЧЕНЫ' if new_val == 1 else 'ВЫКЛЮЧЕНЫ'}*")
             elif text == '📊 Статистика бота':
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM users")
-                self.send_message(chat_id, f"📊 Пользователей в базе: <b>{cursor.fetchone()[0]}</b>")
+                self.send_message(chat_id, f"📊 Пользователей в базе: {cursor.fetchone()[0]}")
             elif text == '👤 Мой профиль':
-                self.send_message(chat_id, f"👤 <b>Ваш ID:</b> <code>{user_id}</code>")
+                self.send_message(chat_id, f"👤 *Ваш ID:* `{user_id}`")
             elif text == 'ℹ️ Помощь':
                 self.send_message(chat_id, "ℹ️ Бот присылает расписание УрЖТ.\nАвтоматическая проверка каждые 5 минут.")
             elif text == '❤️ Поддержать автора':
                 support_text = (
-                    "❤️ <b>ПОДДЕРЖКА АВТОРА</b>\n\n"
+                    "❤️ *ПОДДЕРЖКА АВТОРА*\n\n"
                     "Если вам нравится этот бот и вы хотите поддержать его развитие, вы можете сделать перевод по реквизитам ниже:\n\n"
-                    "💳 <b>Карта:</b> <code>2200 7014 1439 4772</code>\n"
-                    "👤 <b>Автор:</b> @M1PTAHKOB\n\n"
+                    "💳 *Карта:* `2200 7014 1439 4772`\n"
+                    "👤 *Автор:* @M1PTAHKOB\n\n"
                     "Спасибо за вашу поддержку! 🙏"
                 )
                 self.send_message(chat_id, support_text)
@@ -229,7 +265,7 @@ class Button_URGT_Bot:
         for (u_id,) in users:
             if self.send_message(u_id, text): success += 1
             else: failed += 1
-            time.sleep(0.25)
+            time.sleep(0.3)
         return success, failed
 
     def check_for_updates(self):
@@ -258,10 +294,21 @@ class Button_URGT_Bot:
         cursor.execute("SELECT user_id FROM users WHERE notifications = 1")
         users = cursor.fetchall()
         for (u_id,) in users:
-            self.send_message(u_id, "🔔 <b>Вышло новое расписание!</b>")
+            self.send_message(u_id, "🔔 *Вышло новое расписание!*")
             for c in changes: 
                 self.send_pdf(u_id, c['url'])
                 time.sleep(0.2)
+
+    def console_listener(self):
+        while self.running:
+            try:
+                cmd = input().strip()
+                if cmd.startswith("send:"):
+                    parts = cmd.split(":", 2)
+                    if len(parts) == 3:
+                        u_id, u_text = parts[1], parts[2]
+                        self.send_message(u_id, u_text)
+            except: pass
 
     def background_checker(self):
         while self.running:
@@ -273,6 +320,7 @@ class Button_URGT_Bot:
 
     def run(self):
         threading.Thread(target=self.background_checker, daemon=True).start()
+        threading.Thread(target=self.console_listener, daemon=True).start()
         while self.running:
             try:
                 r = requests.get(self.base_url + "getUpdates", params={'timeout': 30, 'offset': self.last_update_id + 1}, timeout=35)
@@ -287,3 +335,4 @@ class Button_URGT_Bot:
 if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
+        

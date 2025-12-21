@@ -18,7 +18,8 @@ import shutil
 
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8" 
-ADMIN_USERNAME = "M1pTAHKOB"  # Ваш username без @
+ADMIN_ID = 7634746932  # Ваш фиксированный ID
+ADMIN_USERNAME = "M1pTAHKOB"
 
 CHECK_INTERVAL = 300 
 MAX_DAYS_BACK = 7    
@@ -153,7 +154,7 @@ class Button_URGT_Bot:
     # ========== ОБРАБОТЧИКИ ==========
 
     def handle_settings(self, chat_id, user_id, username):
-        is_admin = (username == ADMIN_USERNAME)
+        is_admin = (user_id == ADMIN_ID)
         msg = "⚙️ *НАСТРОЙКИ БОТА*\n\nВыберите нужное действие ниже:"
         if is_admin: msg += "\n\n👑 *Меню администратора активно*"
         self.send_message(chat_id, msg, self.create_settings_keyboard(is_admin))
@@ -164,7 +165,7 @@ class Button_URGT_Bot:
             user_id = message['from']['id']
             username = message['from'].get('username', '')
             text = message.get('text', '').strip()
-            is_admin = (username == ADMIN_USERNAME)
+            is_admin = (user_id == ADMIN_ID)
 
             if is_admin and self.waiting_for_broadcast and text != '⬅️ Назад':
                 self.waiting_for_broadcast = False
@@ -226,25 +227,17 @@ class Button_URGT_Bot:
         
         self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
 
-        if is_new and username != ADMIN_USERNAME:
+        # Уведомляем админа, если зашел новый человек (и это не сам админ)
+        if is_new and user_id != ADMIN_ID:
             self.notify_admin_about_new_user(user_info)
 
     def notify_admin_about_new_user(self, user_info):
-        """Уведомление админа о новом юзере"""
-        cursor = self.conn.cursor()
-        # Ищем ID админа по username в БД
-        cursor.execute("SELECT user_id FROM users WHERE username = ?", (ADMIN_USERNAME,))
-        admin_data = cursor.fetchone()
+        """Прямая отправка уведомления админу по ID"""
+        name = user_info.get('first_name', 'User')
+        uname = f"@{user_info.get('username')}" if user_info.get('username') else "нет"
         
-        if admin_data:
-            admin_id = admin_data[0]
-            name = user_info.get('first_name', 'User')
-            uname = f"@{user_info.get('username')}" if user_info.get('username') else "нет"
-            
-            msg = f"🆕 *Новый пользователь!*\n👤 Имя: {name}\n🔗 Юзернейм: {uname}\n🆔 ID: `{user_info['id']}`"
-            self.send_message(admin_id, msg)
-        else:
-            logger.warning(f"Админ {ADMIN_USERNAME} не найден в БД. Уведомление не отправлено.")
+        msg = f"🆕 *Новый пользователь!*\n👤 Имя: {name}\n🔗 Юзернейм: {uname}\n🆔 ID: `{user_info['id']}`"
+        self.send_message(ADMIN_ID, msg)
 
     def handle_user_list(self, chat_id):
         try:
@@ -261,7 +254,7 @@ class Button_URGT_Bot:
                 user_link = f"@{username}" if username else f"[{first_name}](tg://user?id={u_id})"
                 line = f"• {user_link} (`{u_id}`)\n"
                 
-                # Чтобы не превысить лимит сообщения Telegram (4096 симв)
+                # Защита от слишком длинных сообщений
                 if len(response) + len(line) > 4000:
                     self.send_message(chat_id, response)
                     response = ""
@@ -272,12 +265,10 @@ class Button_URGT_Bot:
         except Exception as e:
             logger.error(f"Ошибка списка: {e}")
 
+    # ... остальная часть кода без изменений ...
+    
     def handle_support(self, chat_id):
-        support_text = (
-            "❤️ *ПОДДЕРЖКА АВТОРА*\n\n"
-            "Карта: `2200 7014 1439 4772`\n"
-            "Автор: @M1PTAHKOB"
-        )
+        support_text = "❤️ *ПОДДЕРЖКА АВТОРА*\n\nКарта: `2200 7014 1439 4772`\nАвтор: @M1PTAHKOB"
         self.send_message(chat_id, support_text)
 
     def handle_today(self, chat_id):

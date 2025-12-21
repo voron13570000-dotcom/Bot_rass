@@ -77,7 +77,6 @@ class Button_URGT_Bot:
             logger.error(f"❌ Ошибка БД: {e}")
             raise
 
-    # ========== КЛАВИАТУРЫ ==========
     def create_main_keyboard(self):
         keyboard = {
             "keyboard": [
@@ -99,10 +98,8 @@ class Button_URGT_Bot:
     def create_back_keyboard(self):
         return json.dumps({"keyboard": [[{"text": "⬅️ Назад"}]], "resize_keyboard": True})
 
-    # ========== ОТПРАВКА (HTML MODE) ==========
     def send_message(self, chat_id, text, keyboard=None, parse_mode='HTML'):
         url = self.base_url + "sendMessage"
-        # Используем HTML вместо Markdown для стабильности
         params = {'chat_id': chat_id, 'text': text, 'parse_mode': parse_mode, 'disable_web_page_preview': True}
         if keyboard: params['reply_markup'] = keyboard
         
@@ -139,7 +136,6 @@ class Button_URGT_Bot:
         date_str = target_date.strftime("%d%m%Y")
         return f"https://urgt66.ru/media/sub/3656/files/raspisanie-na-{date_str}.pdf"
 
-    # ========== ОБРАБОТЧИКИ ==========
     def process_message(self, message):
         try:
             chat_id = message['chat']['id']
@@ -171,7 +167,7 @@ class Button_URGT_Bot:
                 self.send_message(chat_id, "⚙️ <b>НАСТРОЙКИ</b>", self.create_settings_keyboard(is_admin))
             elif text == '📢 Рассылка всем' and is_admin:
                 self.waiting_for_broadcast = True
-                self.send_message(chat_id, "📝 <b>Введите текст сообщения:</b>", self.create_back_keyboard())
+                self.send_message(chat_id, "📝 <b>Введите текст сообщения для рассылки:</b>", self.create_back_keyboard())
             elif text == '🔔 Вкл/Выкл уведомления':
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT notifications FROM users WHERE user_id = ?", (user_id,))
@@ -189,7 +185,14 @@ class Button_URGT_Bot:
             elif text == 'ℹ️ Помощь':
                 self.send_message(chat_id, "ℹ️ Бот присылает расписание УрЖТ.\nАвтоматическая проверка каждые 5 минут.")
             elif text == '❤️ Поддержать автора':
-                self.send_message(chat_id, "💳 <b>Карта:</b> <code>2200 7014 1439 4772</code> \nСпасибо!")
+                support_text = (
+                    "❤️ <b>ПОДДЕРЖКА АВТОРА</b>\n\n"
+                    "Если вам нравится этот бот и вы хотите поддержать его развитие, вы можете сделать перевод по реквизитам ниже:\n\n"
+                    "💳 <b>Карта:</b> <code>2200 7014 1439 4772</code>\n"
+                    "👤 <b>Автор:</b> @M1PTAHKOB\n\n"
+                    "Спасибо за вашу поддержку! 🙏"
+                )
+                self.send_message(chat_id, support_text)
             elif text == '⬅️ Назад':
                 self.waiting_for_broadcast = False
                 self.send_message(chat_id, "↩️ Главное меню", self.create_main_keyboard())
@@ -224,10 +227,9 @@ class Button_URGT_Bot:
         users = cursor.fetchall()
         success, failed = 0, 0
         for (u_id,) in users:
-            # При рассылке передаем текст как есть, HTML проигнорирует случайные символы
             if self.send_message(u_id, text): success += 1
             else: failed += 1
-            time.sleep(0.25) # Оптимальная задержка
+            time.sleep(0.25)
         return success, failed
 
     def check_for_updates(self):

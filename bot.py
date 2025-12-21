@@ -153,7 +153,7 @@ class Button_URGT_Bot:
     # ========== ОБРАБОТЧИКИ ==========
 
     def handle_settings(self, chat_id, user_id, username):
-        is_admin = username == ADMIN_USERNAME
+        is_admin = (username == ADMIN_USERNAME)
         msg = "⚙️ *НАСТРОЙКИ БОТА*\n\nВыберите нужное действие ниже:"
         if is_admin: msg += "\n\n👑 *Меню администратора активно*"
         self.send_message(chat_id, msg, self.create_settings_keyboard(is_admin))
@@ -164,7 +164,7 @@ class Button_URGT_Bot:
             user_id = message['from']['id']
             username = message['from'].get('username', '')
             text = message.get('text', '').strip()
-            is_admin = username == ADMIN_USERNAME
+            is_admin = (username == ADMIN_USERNAME)
 
             if is_admin and self.waiting_for_broadcast and text != '⬅️ Назад':
                 self.waiting_for_broadcast = False
@@ -210,17 +210,14 @@ class Button_URGT_Bot:
     # ========== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ==========
 
     def handle_start(self, chat_id, user_info):
-        """Регистрация пользователя и уведомление админа о новом юзере"""
         user_id = user_info['id']
         username = user_info.get('username', '')
         first_name = user_info.get('first_name', 'Без имени')
         
         cursor = self.conn.cursor()
-        # Проверяем, есть ли пользователь в базе
         cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
         is_new = cursor.fetchone() is None
         
-        # Сохраняем/обновляем данные
         cursor.execute("""
             INSERT OR REPLACE INTO users (user_id, username, first_name, last_name, last_active) 
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -229,13 +226,13 @@ class Button_URGT_Bot:
         
         self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
 
-        # Если пользователь новый — уведомляем админа
-        if is_new:
+        if is_new and username != ADMIN_USERNAME:
             self.notify_admin_about_new_user(user_info)
 
     def notify_admin_about_new_user(self, user_info):
-        """Поиск ID админа и отправка ему уведомления с обновленным списком"""
+        """Уведомление админа о новом юзере"""
         cursor = self.conn.cursor()
+        # Ищем ID админа по username в БД
         cursor.execute("SELECT user_id FROM users WHERE username = ?", (ADMIN_USERNAME,))
         admin_data = cursor.fetchone()
         
@@ -246,26 +243,32 @@ class Button_URGT_Bot:
             
             msg = f"🆕 *Новый пользователь!*\n👤 Имя: {name}\n🔗 Юзернейм: {uname}\n🆔 ID: `{user_info['id']}`"
             self.send_message(admin_id, msg)
-            
-            # Сразу присылаем админу обновленный список
-            self.handle_user_list(admin_id)
+        else:
+            logger.warning(f"Админ {ADMIN_USERNAME} не найден в БД. Уведомление не отправлено.")
 
     def handle_user_list(self, chat_id):
         try:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT user_id, username, first_name FROM users ORDER BY created DESC LIMIT 50")
+            cursor.execute("SELECT user_id, username, first_name FROM users ORDER BY created DESC")
             users = cursor.fetchall()
             
             if not users:
                 self.send_message(chat_id, "📭 Список пользователей пуст.")
                 return
 
-            response = "👥 *Последние пользователи (всего: " + str(len(users)) + "):*\n\n"
+            response = f"👥 *Список пользователей (всего: {len(users)}):*\n\n"
             for u_id, username, first_name in users:
-                user_info = f"@{username}" if username else f"[{first_name}](tg://user?id={u_id})"
-                response += f"• {user_info} (ID: `{u_id}`)\n"
+                user_link = f"@{username}" if username else f"[{first_name}](tg://user?id={u_id})"
+                line = f"• {user_link} (`{u_id}`)\n"
+                
+                # Чтобы не превысить лимит сообщения Telegram (4096 симв)
+                if len(response) + len(line) > 4000:
+                    self.send_message(chat_id, response)
+                    response = ""
+                response += line
             
-            self.send_message(chat_id, response)
+            if response:
+                self.send_message(chat_id, response)
         except Exception as e:
             logger.error(f"Ошибка списка: {e}")
 

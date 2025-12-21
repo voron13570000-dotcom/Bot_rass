@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 БОТ ДЛЯ РАСПИСАНИЯ УрЖТ С КНОПОЧНЫМ МЕНЮ И РАССЫЛКОЙ
+Актуальное расписание звонков на 2025-2026 уч. год
 """
 
 import requests
@@ -16,7 +17,7 @@ import sys
 
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8" 
-ADMIN = "7634746932"  # Ваш актуальный ID
+ADMIN = "7634746932" 
 
 CHECK_INTERVAL = 300
 MAX_DAYS_BACK = 7
@@ -82,17 +83,13 @@ class Button_URGT_Bot:
         url = self.base_url + "sendMessage"
         params = {'chat_id': chat_id, 'text': text, 'parse_mode': parse_mode, 'disable_web_page_preview': True}
         if keyboard: params['reply_markup'] = keyboard
-        
         try:
             response = requests.post(url, params=params, timeout=15)
-            if response.status_code != 200:
-                if "can't parse entities" in response.text:
-                    params.pop('parse_mode')
-                    response = requests.post(url, params=params, timeout=15)
+            if response.status_code != 200 and "can't parse entities" in response.text:
+                params.pop('parse_mode')
+                response = requests.post(url, params=params, timeout=15)
             return response.status_code == 200
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки: {e}")
-            return False
+        except: return False
 
     def send_pdf(self, chat_id, pdf_url):
         try:
@@ -101,8 +98,7 @@ class Button_URGT_Bot:
             if response.status_code == 200:
                 temp_file = "temp/temp_schedule.pdf"
                 with open(temp_file, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+                    for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
                 with open(temp_file, "rb") as file:
                     requests.post(self.base_url + "sendDocument", 
                                  data={'chat_id': chat_id, 'caption': '📄 Расписание УрЖТ'}, 
@@ -120,6 +116,7 @@ class Button_URGT_Bot:
         return json.dumps({
             "keyboard": [
                 [{"text": "📅 Сегодня"}, {"text": "📆 Завтра"}],
+                [{"text": "🔔 Расписание звонков"}],
                 [{"text": "🔍 Проверить обновления"}, {"text": "⚙️ Настройки"}],
                 [{"text": "ℹ️ Помощь"}, {"text": "👤 Мой профиль"}],
                 [{"text": "❤️ Поддержать автора"}]
@@ -135,6 +132,50 @@ class Button_URGT_Bot:
     def create_back_keyboard(self):
         return json.dumps({"keyboard": [[{"text": "⬅️ Назад"}]], "resize_keyboard": True})
 
+    def handle_bells(self, chat_id):
+        now = datetime.now()
+        day_of_week = now.weekday() # 0 - Понедельник, 6 - Воскресенье
+
+        if day_of_week == 0: # ПОНЕДЕЛЬНИК
+            bells_text = (
+                "🔔 *ЗВОНКИ УрЖТ (Понедельник)*\n"
+                "📍 _г. Екатеринбург_\n\n"
+                "📢 *Линейка:* 08:30 — 08:40\n"
+                "🏫 *Классный час:* 08:45 — 09:30\n\n"
+                "1️⃣ *1 пара:* 09:40 — 11:15\n"
+                "2️⃣ *2 пара:* 11:25 — 13:00\n"
+                "🍱 *Обед:* 13:00 — 13:40\n"
+                "3️⃣ *3 пара:* 13:40 — 15:15\n"
+                "☕️ *Перерыв:* 15:15 — 15:35\n"
+                "4️⃣ *4 пара:* 15:35 — 17:10\n"
+                "5️⃣ *5 пара:* 17:20 — 18:55\n"
+                "6️⃣ *6 пара:* 19:05 — 20:40"
+            )
+        elif day_of_week == 5: # СУББОТА
+            bells_text = (
+                "🔔 *ЗВОНКИ УрЖТ (Суббота)*\n"
+                "📍 _г. Екатеринбург_\n\n"
+                "1️⃣ *1 пара:* 09:00 — 10:35\n"
+                "2️⃣ *2 пара:* 10:45 — 12:20\n"
+                "🍱 *Обед:* 12:20 — 12:40\n"
+                "3️⃣ *3 пара:* 12:40 — 14:15\n"
+                "4️⃣ *4 пара:* 14:25 — 16:00"
+            )
+        else: # ВТОРНИК - ПЯТНИЦА
+            bells_text = (
+                "🔔 *ЗВОНКИ УрЖТ (Вторник–Пятница)*\n"
+                "📍 _г. Екатеринбург_\n\n"
+                "1️⃣ *1 пара:* 09:00 — 10:35\n"
+                "2️⃣ *2 пара:* 10:45 — 12:20\n"
+                "🍱 *Обед:* 12:20 — 13:00\n"
+                "3️⃣ *3 пара:* 13:00 — 14:30\n"
+                "☕️ *Перерыв:* 14:30 — 14:50\n"
+                "4️⃣ *4 пара:* 14:50 — 16:25\n"
+                "5️⃣ *5 пара:* 16:35 — 18:10\n"
+                "6️⃣ *6 пара:* 18:20 — 19:55"
+            )
+        self.send_message(chat_id, bells_text)
+
     def process_message(self, message):
         try:
             chat_id = message['chat']['id']
@@ -143,31 +184,23 @@ class Button_URGT_Bot:
             text = message.get('text', '').strip()
             is_admin = str(user_id) == str(ADMIN)
 
-            # КОМАНДЫ АДМИНИСТРАТОРА
+            # АДМИН КОМАНДЫ
             if is_admin and text == '/users':
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT user_id, username, first_name FROM users")
                 users_list = cursor.fetchall()
-                if not users_list:
-                    self.send_message(chat_id, "📭 Список пользователей пуст.")
-                else:
-                    report = "👥 *Список пользователей:*\n\n"
-                    for u in users_list: 
-                        report += f"`{u[0]}` | @{u[1] if u[1] else 'None'} | {u[2]}\n"
-                    self.send_message(chat_id, report[:4000])
+                report = "👥 *Список пользователей:*\n\n"
+                for u in users_list: report += f"`{u[0]}` | @{u[1]} | {u[2]}\n"
+                self.send_message(chat_id, report[:4000])
                 return
 
             if is_admin and text.startswith('/send'):
                 parts = text.split(maxsplit=2)
                 if len(parts) == 3:
-                    target_id, msg_body = parts[1], parts[2]
-                    if self.send_message(target_id, f"✉️ *Личное сообщение от администратора:*\n\n{msg_body}"):
-                        self.send_message(chat_id, "✅ Сообщение доставлено.")
-                    else: 
-                        self.send_message(chat_id, "❌ Ошибка отправки.")
+                    self.send_message(parts[1], f"✉️ *Личное сообщение от администратора:*\n\n{parts[2]}")
                 return
 
-            # ОБРАБОТКА КНОПОК
+            # КНОПКИ
             if text in ['/start', '/старт']:
                 cursor = self.conn.cursor()
                 cursor.execute("INSERT OR REPLACE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)",
@@ -176,6 +209,7 @@ class Button_URGT_Bot:
                 self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
             elif text == '📅 Сегодня': self.handle_today(chat_id)
             elif text == '📆 Завтра': self.handle_tomorrow(chat_id)
+            elif text == '🔔 Расписание звонков': self.handle_bells(chat_id)
             elif text == '🔍 Проверить обновления': self.handle_check_updates(chat_id)
             elif text == '⚙️ Настройки': self.send_message(chat_id, "⚙️ *НАСТРОЙКИ*", self.create_settings_keyboard(is_admin))
             elif text == '📊 Статистика бота':
@@ -183,45 +217,25 @@ class Button_URGT_Bot:
                 cursor.execute("SELECT COUNT(*) FROM users")
                 self.send_message(chat_id, f"📊 *Статистика*\n\nПользователей: {cursor.fetchone()[0]}")
             elif text == '👤 Мой профиль': self.send_message(chat_id, f"👤 *Ваш ID:* `{user_id}`")
-            elif text == 'ℹ️ Помощь': self.send_message(chat_id, "ℹ️ Бот присылает расписание УрЖТ.\nАвтоматическая проверка каждые 5 минут.")
             elif text == '❤️ Поддержать автора':
-                support_text = (
-                    "❤️ *ПОДДЕРЖКА АВТОРА*\n\n"
-                    "Если вам нравится этот бот и вы хотите поддержать его развитие, вы можете сделать перевод по реквизитам ниже:\n\n"
-                    "💳 *Карта:* `2200 7014 1439 4772`\n"
-                    "👤 *Автор:* @M1PTAHKOB\n\n"
-                    "Спасибо за вашу поддержку! 🙏"
-                )
-                self.send_message(chat_id, support_text)
+                self.send_message(chat_id, "❤️ *ПОДДЕРЖКА АВТОРА*\n\n💳 *Карта:* `2200 7014 1439 4772` \n👤 *Автор:* @M1PTAHKOB\n\nСпасибо! 🙏")
             elif text == '⬅️ Назад':
                 self.waiting_for_broadcast = False
                 self.send_message(chat_id, "↩️ Главное меню", self.create_main_keyboard())
             elif text == '📢 Рассылка всем' and is_admin:
                 self.waiting_for_broadcast = True
                 self.send_message(chat_id, "📝 *Введите текст сообщения для рассылки:*", self.create_back_keyboard())
-            
-            # РЕЖИМ РАССЫЛКИ
             elif is_admin and self.waiting_for_broadcast:
                 self.waiting_for_broadcast = False
-                self.send_message(chat_id, "🚀 *Запуск рассылки...*")
-                success, failed = self.broadcast_message(text)
-                report = f"✅ *Готово!*\nУспешно: {success}\nОшибок: {failed}"
-                self.send_message(chat_id, report, self.create_main_keyboard())
-
-            # ОБРАТНАЯ СВЯЗЬ
+                s, f = self.broadcast_message(text)
+                self.send_message(chat_id, f"✅ *Готово!*\nУспешно: {s}\nОшибок: {f}", self.create_main_keyboard())
             elif not is_admin:
-                admin_msg = (
-                    f"📩 *Новое сообщение!*\n"
-                    f"От: {message['from'].get('first_name')} (@{username})\n"
-                    f"ID: `{user_id}`\n\n"
-                    f"💬 Текст: {text}\n\n"
-                    f"👉 Чтобы ответить: `/send {user_id} Ваш_текст`"
-                )
+                admin_msg = f"📩 *Новое сообщение!*\nОт: {message['from'].get('first_name')} (@{username})\nID: `{user_id}`\n\n💬 Текст: {text}\n\n👉 Ответить: `/send {user_id} Ваш_текст`"
                 self.send_message(ADMIN, admin_msg)
                 self.send_message(chat_id, "✅ Сообщение отправлено администратору.")
 
         except Exception as e:
-            logger.error(f"Ошибка процесса: {e}")
+            logger.error(f"Ошибка: {e}")
 
     def handle_today(self, chat_id):
         date = datetime.now()
@@ -239,38 +253,34 @@ class Button_URGT_Bot:
         self.send_message(chat_id, "🔍 Проверяю сайт...")
         changes = self.check_for_updates()
         if changes:
-            self.send_message(chat_id, f"✅ Найдено новых файлов: {len(changes)}")
             for c in changes: self.send_pdf(chat_id, c['url'])
-        else:
-            self.send_message(chat_id, "✅ У вас актуальное расписание.")
+        else: self.send_message(chat_id, "✅ У вас актуальное расписание.")
 
     def broadcast_message(self, text):
         cursor = self.conn.cursor()
         cursor.execute("SELECT user_id FROM users")
-        users = cursor.fetchall()
-        success, failed = 0, 0
-        for (u_id,) in users:
-            if self.send_message(u_id, text): success += 1
-            else: failed += 1
+        s, f = 0, 0
+        for (u_id,) in cursor.fetchall():
+            if self.send_message(u_id, text): s += 1
+            else: f += 1
             time.sleep(0.1)
-        return success, failed
+        return s, f
 
     def check_for_updates(self):
         changes = []
         for i in range(MAX_DAYS_BACK + 1):
             date = datetime.now() + timedelta(days=i)
-            date_str = date.strftime("%Y-%m-%d")
             url = self.get_pdf_url(date)
             try:
                 r = requests.get(url, timeout=10)
                 if r.status_code == 200:
                     h = hashlib.md5(r.content).hexdigest()
                     cursor = self.conn.cursor()
-                    cursor.execute("SELECT file_hash FROM file_history WHERE date = ? ORDER BY id DESC LIMIT 1", (date_str,))
+                    cursor.execute("SELECT file_hash FROM file_history WHERE date = ? ORDER BY id DESC LIMIT 1", (date.strftime("%Y-%m-%d"),))
                     row = cursor.fetchone()
                     if not row or row[0] != h:
                         cursor.execute("INSERT INTO file_history (date, file_url, file_hash, file_size) VALUES (?,?,?,?)",
-                                       (date_str, url, h, len(r.content)))
+                                       (date.strftime("%Y-%m-%d"), url, h, len(r.content)))
                         self.conn.commit()
                         changes.append({'url': url})
             except: pass
@@ -306,4 +316,4 @@ class Button_URGT_Bot:
 if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
-    
+                                       

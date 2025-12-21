@@ -18,7 +18,7 @@ import shutil
 
 # ========== НАСТРОЙКИ ==========
 # Обновленный токен по вашему запросу
-BOT_TOKEN = "8518881565:AAEQFfOCO3gcPAnNtV25-hl_z5WzCNCouDg" 
+BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8" 
 ADMIN = "M1pTAHKOB"  # Убедитесь, что это ваш username (без @) или ID
 
 # Настройки проверки
@@ -351,3 +351,4 @@ class Button_URGT_Bot:
 if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
+

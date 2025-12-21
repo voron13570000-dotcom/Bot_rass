@@ -17,15 +17,12 @@ import traceback
 import shutil
 
 # ========== НАСТРОЙКИ ==========
-# Обновленный токен по вашему запросу
 BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8" 
-ADMIN = "M1pTAHKOB"  # Убедитесь, что это ваш username (без @) или ID
+ADMIN = "M1pTAHKOB"  # Username без @ или ID
 
-# Настройки проверки
-CHECK_INTERVAL = 300 # 5 минут (300 секунд)
-MAX_DAYS_BACK = 7    # Проверять расписание на 7 дней вперед
+CHECK_INTERVAL = 300 
+MAX_DAYS_BACK = 7    
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -42,14 +39,13 @@ class Button_URGT_Bot:
         self.init_db()
         self.last_update_id = 0
         self.running = True
-        self.waiting_for_broadcast = False  # Флаг для режима рассылки через ТГ
+        self.waiting_for_broadcast = False 
         
         logger.info("=" * 60)
         logger.info("🤖 БОТ УрЖТ С КНОПОЧНЫМ МЕНЮ")
         logger.info("=" * 60)
     
     def init_db(self):
-        """Инициализировать базу данных"""
         try:
             os.makedirs("data", exist_ok=True)
             self.conn = sqlite3.connect("data/urgt_buttons.db", check_same_thread=False)
@@ -103,7 +99,8 @@ class Button_URGT_Bot:
     def create_settings_keyboard(self, is_admin=False):
         buttons = [[{"text": "🔔 Вкл/Выкл уведомления"}]]
         if is_admin:
-            buttons.append([{"text": "📢 Рассылка всем"}])
+            # Добавлена кнопка списка пользователей для админа
+            buttons.append([{"text": "📢 Рассылка всем"}, {"text": "👥 Список пользователей"}])
         buttons.append([{"text": "📊 Статистика бота"}])
         buttons.append([{"text": "⬅️ Назад"}])
         
@@ -170,7 +167,6 @@ class Button_URGT_Bot:
             text = message.get('text', '').strip()
             is_admin = str(user_id) == ADMIN or username == ADMIN.lstrip('@')
 
-            # Логика рассылки (ожидание текста)
             if is_admin and self.waiting_for_broadcast and text != '⬅️ Назад':
                 self.waiting_for_broadcast = False
                 self.send_message(chat_id, "🚀 *Запуск рассылки...*")
@@ -178,7 +174,6 @@ class Button_URGT_Bot:
                 self.send_message(chat_id, f"✅ *Готово!*\nУспешно: {success}\nОшибок: {failed}", self.create_main_keyboard())
                 return
 
-            # Команды
             if text in ['/start', '/старт']:
                 self.handle_start(chat_id, message['from'])
             elif text == '📅 Сегодня':
@@ -192,6 +187,8 @@ class Button_URGT_Bot:
             elif text == '📢 Рассылка всем' and is_admin:
                 self.waiting_for_broadcast = True
                 self.send_message(chat_id, "📝 *Введите текст сообщения для рассылки:*", self.create_back_keyboard())
+            elif text == '👥 Список пользователей' and is_admin:
+                self.handle_user_list(chat_id)
             elif text == '🔔 Вкл/Выкл уведомления':
                 self.handle_toggle_notifications(chat_id, user_id)
             elif text == '📊 Статистика бота':
@@ -213,6 +210,28 @@ class Button_URGT_Bot:
 
     # ========== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ==========
 
+    def handle_user_list(self, chat_id):
+        """Метод для просмотра списка пользователей админом"""
+        try:
+            cursor = self.conn.cursor()
+            # Берем последние 50 активных пользователей
+            cursor.execute("SELECT user_id, username, first_name FROM users ORDER BY last_active DESC LIMIT 50")
+            users = cursor.fetchall()
+            
+            if not users:
+                self.send_message(chat_id, "📭 Список пользователей пуст.")
+                return
+
+            response = "👥 *Последние активные пользователи:*\n\n"
+            for u_id, username, first_name in users:
+                user_info = f"@{username}" if username else f"[{first_name}](tg://user?id={u_id})"
+                response += f"• {user_info} (ID: `{u_id}`)\n"
+            
+            self.send_message(chat_id, response)
+        except Exception as e:
+            logger.error(f"Ошибка получения списка: {e}")
+            self.send_message(chat_id, "❌ Не удалось загрузить список пользователей.")
+
     def handle_support(self, chat_id):
         support_text = (
             "❤️ *ПОДДЕРЖКА АВТОРА*\n\n"
@@ -225,7 +244,7 @@ class Button_URGT_Bot:
 
     def handle_start(self, chat_id, user_info):
         cursor = self.conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)",
+        cursor.execute("INSERT OR REPLACE INTO users (user_id, username, first_name, last_name, last_active) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
                        (user_info['id'], user_info.get('username'), user_info.get('first_name'), user_info.get('last_name')))
         self.conn.commit()
         self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
@@ -248,7 +267,7 @@ class Button_URGT_Bot:
         cursor = self.conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM users")
         count = cursor.fetchone()[0]
-        self.send_message(chat_id, f"📊 *Статистика*\n\nПользователей: {count}")
+        self.send_message(chat_id, f"📊 *Статистика*\n\nПользователей в базе: {count}")
 
     def handle_toggle_notifications(self, chat_id, user_id):
         cursor = self.conn.cursor()
@@ -256,7 +275,7 @@ class Button_URGT_Bot:
         res = cursor.fetchone()
         if res:
             new_val = 0 if res[0] == 1 else 1
-            cursor.execute("UPDATE users SET notifications = ? WHERE user_id = ?", (new_val, user_id))
+            cursor.execute("UPDATE users SET notifications = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?", (new_val, user_id))
             self.conn.commit()
             status = "ВКЛЮЧЕНЫ" if new_val == 1 else "ВЫКЛЮЧЕНЫ"
             self.send_message(chat_id, f"🔔 Уведомления {status}")

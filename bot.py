@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 БОТ ДЛЯ РАСПИСАНИЯ УрЖТ С КНОПОЧНЫМ МЕНЮ И РАССЫЛКОЙ
-Автоматическое переключение расписания звонков: ПН, ВТ-ПТ, СБ.
+Настроен часовой пояс Екатеринбурга (UTC+5)
 """
 
 import requests
@@ -9,7 +9,7 @@ import time
 import sqlite3
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import threading
 import logging
@@ -18,6 +18,7 @@ import sys
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8" 
 ADMIN = "7634746932" 
+TZ_EKATERINBURG = timezone(timedelta(hours=5)) # Часовой пояс Екатеринбурга (UTC+5)
 
 CHECK_INTERVAL = 300
 MAX_DAYS_BACK = 7
@@ -43,6 +44,7 @@ class Button_URGT_Bot:
         logger.info("=" * 60)
         logger.info("🤖 БОТ УрЖТ ЗАПУЩЕН")
         logger.info(f"👑 Администратор ID: {ADMIN}")
+        logger.info(f"🕒 Часовой пояс: UTC+5 (Екатеринбург)")
         logger.info("=" * 60)
     
     def init_db(self):
@@ -118,8 +120,7 @@ class Button_URGT_Bot:
                 [{"text": "📅 Сегодня"}, {"text": "📆 Завтра"}],
                 [{"text": "🔔 Расписание звонков"}],
                 [{"text": "🔍 Проверить обновления"}, {"text": "⚙️ Настройки"}],
-                [{"text": "ℹ️ Помощь"}, {"text": "👤 Мой профиль"}],
-                [{"text": "❤️ Поддержать автора"}]
+                [{"text": "❤️ Поддержать автора"}] # Убраны Помощь и Профиль
             ], "resize_keyboard": True
         })
 
@@ -133,10 +134,11 @@ class Button_URGT_Bot:
         return json.dumps({"keyboard": [[{"text": "⬅️ Назад"}]], "resize_keyboard": True})
 
     def handle_bells(self, chat_id):
-        now = datetime.now()
-        day_of_week = now.weekday() # 0 - ПН, 1 - ВТ... 5 - СБ, 6 - ВС
+        # Используем время Екатеринбурга
+        now = datetime.now(TZ_EKATERINBURG)
+        day_of_week = now.weekday() 
 
-        if day_of_week == 0: # ПОНЕДЕЛЬНИК (Линейка + КЧ)
+        if day_of_week == 0: # ПОНЕДЕЛЬНИК
             bells_text = (
                 "🔔 *ЗВОНКИ УрЖТ (Понедельник)*\n"
                 "📍 _г. Екатеринбург_\n\n"
@@ -184,6 +186,7 @@ class Button_URGT_Bot:
             text = message.get('text', '').strip()
             is_admin = str(user_id) == str(ADMIN)
 
+            # АДМИН КОМАНДЫ
             if is_admin and text == '/users':
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT user_id, username, first_name FROM users")
@@ -199,6 +202,7 @@ class Button_URGT_Bot:
                     self.send_message(parts[1], f"✉️ *Личное сообщение от администратора:*\n\n{parts[2]}")
                 return
 
+            # КНОПКИ
             if text in ['/start', '/старт']:
                 cursor = self.conn.cursor()
                 cursor.execute("INSERT OR REPLACE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)",
@@ -214,7 +218,6 @@ class Button_URGT_Bot:
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM users")
                 self.send_message(chat_id, f"📊 *Статистика*\n\nПользователей: {cursor.fetchone()[0]}")
-            elif text == '👤 Мой профиль': self.send_message(chat_id, f"👤 *Ваш ID:* `{user_id}`")
             elif text == '❤️ Поддержать автора':
                 self.send_message(chat_id, "❤️ *ПОДДЕРЖКА АВТОРА*\n\n💳 *Карта:* `2200 7014 1439 4772` \n👤 *Автор:* @M1PTAHKOB\n\nСпасибо! 🙏")
             elif text == '⬅️ Назад':
@@ -236,13 +239,13 @@ class Button_URGT_Bot:
             logger.error(f"Ошибка: {e}")
 
     def handle_today(self, chat_id):
-        date = datetime.now()
+        date = datetime.now(TZ_EKATERINBURG)
         self.send_message(chat_id, f"🔍 Ищу на {date.strftime('%d.%m.%Y')}...")
         if not self.send_pdf(chat_id, self.get_pdf_url(date)): 
             self.send_message(chat_id, "❌ Расписание еще не опубликовано.")
 
     def handle_tomorrow(self, chat_id):
-        date = datetime.now() + timedelta(days=1)
+        date = datetime.now(TZ_EKATERINBURG) + timedelta(days=1)
         self.send_message(chat_id, f"🔍 Ищу на {date.strftime('%d.%m.%Y')}...")
         if not self.send_pdf(chat_id, self.get_pdf_url(date)): 
             self.send_message(chat_id, "❌ Расписание еще не опубликовано.")
@@ -267,7 +270,7 @@ class Button_URGT_Bot:
     def check_for_updates(self):
         changes = []
         for i in range(MAX_DAYS_BACK + 1):
-            date = datetime.now() + timedelta(days=i)
+            date = datetime.now(TZ_EKATERINBURG) + timedelta(days=i)
             url = self.get_pdf_url(date)
             try:
                 r = requests.get(url, timeout=10)
@@ -314,4 +317,4 @@ class Button_URGT_Bot:
 if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
-    
+                

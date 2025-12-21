@@ -349,3 +349,5 @@ class Button_URGT_Bot:
             except: time.sleep(5)
 
 if __name__ == "__main__":
+    bot = Button_URGT_Bot()
+    bot.run()

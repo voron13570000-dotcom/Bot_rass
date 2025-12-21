@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 БОТ ДЛЯ РАСПИСАНИЯ УрЖТ С КНОПОЧНЫМ МЕНЮ И РАССЫЛКОЙ
-Добавлены функции: /send ID текст и /users
+Функции: /send ID текст, /users и автоматическая обратная связь.
 """
 
 import requests
@@ -17,7 +17,7 @@ import sys
 
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8" 
-ADMIN = "M1pTAHKOB"
+ADMIN = "7634746932"  # Ваш актуальный ID
 
 CHECK_INTERVAL = 300
 MAX_DAYS_BACK = 7
@@ -42,7 +42,7 @@ class Button_URGT_Bot:
         
         logger.info("=" * 60)
         logger.info("🤖 БОТ УрЖТ ЗАПУЩЕН")
-        logger.info("👑 Админ-команды: /send ID текст, /users")
+        logger.info(f"👑 Администратор ID: {ADMIN}")
         logger.info("=" * 60)
     
     def init_db(self):
@@ -79,7 +79,6 @@ class Button_URGT_Bot:
             logger.error(f"❌ Ошибка БД: {e}")
             raise
 
-    # ========== ОТПРАВКА ==========
     def send_message(self, chat_id, text, keyboard=None, parse_mode='Markdown'):
         url = self.base_url + "sendMessage"
         params = {'chat_id': chat_id, 'text': text, 'parse_mode': parse_mode, 'disable_web_page_preview': True}
@@ -88,14 +87,13 @@ class Button_URGT_Bot:
         try:
             response = requests.post(url, params=params, timeout=15)
             if response.status_code != 200:
-                # Если Markdown ломается, отправляем как обычный текст
                 if "can't parse entities" in response.text:
                     params.pop('parse_mode')
                     response = requests.post(url, params=params, timeout=15)
-                logger.error(f"⚠️ Ошибка отправки {chat_id}: {response.text}")
+                logger.error(f"⚠️ Ошибка {chat_id}: {response.text}")
             return response.status_code == 200
         except Exception as e:
-            logger.error(f"❌ Ошибка запроса: {e}")
+            logger.error(f"❌ Ошибка отправки: {e}")
             return False
 
     def send_pdf(self, chat_id, pdf_url):
@@ -106,7 +104,6 @@ class Button_URGT_Bot:
                 temp_file = "temp/temp_schedule.pdf"
                 with open(temp_file, "wb") as f:
                     for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
-                
                 with open(temp_file, "rb") as file:
                     requests.post(self.base_url + "sendDocument", 
                                  data={'chat_id': chat_id, 'caption': '📄 Расписание УрЖТ'}, 
@@ -114,15 +111,12 @@ class Button_URGT_Bot:
                 if os.path.exists(temp_file): os.remove(temp_file)
                 return True
             return False
-        except Exception as e:
-            logger.error(f"Ошибка PDF: {e}")
-            return False
+        except: return False
 
     def get_pdf_url(self, target_date):
         date_str = target_date.strftime("%d%m%Y")
         return f"https://urgt66.ru/media/sub/3656/files/raspisanie-na-{date_str}.pdf"
 
-    # ========== КЛАВИАТУРЫ ==========
     def create_main_keyboard(self):
         return json.dumps({
             "keyboard": [
@@ -142,84 +136,57 @@ class Button_URGT_Bot:
     def create_back_keyboard(self):
         return json.dumps({"keyboard": [[{"text": "⬅️ Назад"}]], "resize_keyboard": True})
 
-    # ========== ОБРАБОТЧИКИ ==========
     def process_message(self, message):
         try:
             chat_id = message['chat']['id']
             user_id = message['from']['id']
             username = message['from'].get('username', '')
             text = message.get('text', '').strip()
-            is_admin = str(user_id) == ADMIN or username == ADMIN.lstrip('@')
+            is_admin = str(user_id) == str(ADMIN)
 
-            # КОМАНДА /users (ТОЛЬКО ДЛЯ АДМИНА)
+            # КОМАНДЫ АДМИНИСТРАТОРА
             if is_admin and text == '/users':
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT user_id, username, first_name FROM users")
                 users_list = cursor.fetchall()
                 if not users_list:
-                    self.send_message(chat_id, "📭 База данных пуста.")
+                    self.send_message(chat_id, "📭 Список пользователей пуст.")
                 else:
-                    report = "👥 *Список пользователей бота:*\n\n"
-                    for u in users_list:
-                        report += f"ID: `{u[0]}` | @{u[1] if u[1] else 'None'} | {u[2]}\n"
-                    # Если список слишком длинный, Telegram может его не принять, поэтому ограничим
-                    self.send_message(chat_id, report[:4000]) 
+                    report = "👥 *Список пользователей:*\n\n"
+                    for u in users_list: 
+                        report += f"`{u[0]}` | @{u[1] if u[1] else 'None'} | {u[2]}\n"
+                    self.send_message(chat_id, report[:4000])
                 return
 
-            # КОМАНДА /send ID Текст (ТОЛЬКО ДЛЯ АДМИНА)
             if is_admin and text.startswith('/send'):
                 parts = text.split(maxsplit=2)
                 if len(parts) == 3:
-                    target_id, msg_text = parts[1], parts[2]
-                    out_msg = f"✉️ *Личное сообщение от администратора:*\n\n{msg_text}"
-                    if self.send_message(target_id, out_msg):
-                        self.send_message(chat_id, f"✅ Доставлено пользователю `{target_id}`")
-                    else:
-                        self.send_message(chat_id, "❌ Не удалось отправить (неверный ID или блок).")
+                    target_id, msg_body = parts[1], parts[2]
+                    if self.send_message(target_id, f"✉️ *Личное сообщение от администратора:*\n\n{msg_body}"):
+                        self.send_message(chat_id, "✅ Сообщение доставлено.")
+                    else: 
+                        self.send_message(chat_id, "❌ Не удалось отправить (ID не найден или бот заблокирован).")
                 else:
                     self.send_message(chat_id, "ℹ️ Формат: `/send ID Текст`")
                 return
 
-            if is_admin and self.waiting_for_broadcast and text != '⬅️ Назад':
-                self.waiting_for_broadcast = False
-                self.send_message(chat_id, "🚀 *Запуск рассылки...*")
-                success, failed = self.broadcast_message(text)
-                self.send_message(chat_id, f"✅ *Готово!*\nУспешно: {success}\nОшибок: {failed}", self.create_main_keyboard())
-                return
-
+            # ОБРАБОТКА КНОПОК
             if text in ['/start', '/старт']:
                 cursor = self.conn.cursor()
                 cursor.execute("INSERT OR REPLACE INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)",
                                (user_id, username, message['from'].get('first_name'), message['from'].get('last_name')))
                 self.conn.commit()
                 self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
-            elif text == '📅 Сегодня':
-                self.handle_today(chat_id)
-            elif text == '📆 Завтра':
-                self.handle_tomorrow(chat_id)
-            elif text == '🔍 Проверить обновления':
-                self.handle_check_updates(chat_id)
-            elif text == '⚙️ Настройки':
-                self.send_message(chat_id, "⚙️ *НАСТРОЙКИ*", self.create_settings_keyboard(is_admin))
-            elif text == '📢 Рассылка всем' and is_admin:
-                self.waiting_for_broadcast = True
-                self.send_message(chat_id, "📝 *Введите текст сообщения для рассылки:*", self.create_back_keyboard())
-            elif text == '🔔 Вкл/Выкл уведомления':
-                cursor = self.conn.cursor()
-                cursor.execute("SELECT notifications FROM users WHERE user_id = ?", (user_id,))
-                res = cursor.fetchone()
-                new_val = 0 if res and res[0] == 1 else 1
-                cursor.execute("UPDATE users SET notifications = ? WHERE user_id = ?", (new_val, user_id))
-                self.conn.commit()
-                self.send_message(chat_id, f"🔔 Уведомления *{'ВКЛЮЧЕНЫ' if new_val == 1 else 'ВЫКЛЮЧЕНЫ'}*")
+            elif text == '📅 Сегодня': self.handle_today(chat_id)
+            elif text == '📆 Завтра': self.handle_tomorrow(chat_id)
+            elif text == '🔍 Проверить обновления': self.handle_check_updates(chat_id)
+            elif text == '⚙️ Настройки': self.send_message(chat_id, "⚙️ *НАСТРОЙКИ*", self.create_settings_keyboard(is_admin))
             elif text == '📊 Статистика бота':
                 cursor = self.conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM users")
                 self.send_message(chat_id, f"📊 Пользователей в базе: {cursor.fetchone()[0]}")
-            elif text == '👤 Мой профиль':
-                self.send_message(chat_id, f"👤 *Ваш ID:* `{user_id}`")
-            elif text == 'ℹ️ Помощь':
-                self.send_message(chat_id, "ℹ️ Бот присылает расписание УрЖТ.\nАвтоматическая проверка каждые 5 минут.")
+            elif text == '👤 Мой профиль': self.send_message(chat_id, f"👤 *Ваш ID:* `{user_id}`")
+            elif text == 'ℹ️ Помощь': self.send_message(chat_id, "ℹ️ Бот присылает расписание УрЖТ.\nАвтоматическая проверка каждые 5 минут.")
             elif text == '❤️ Поддержать автора':
                 support_text = (
                     "❤️ *ПОДДЕРЖКА АВТОРА*\n\n"
@@ -232,41 +199,51 @@ class Button_URGT_Bot:
             elif text == '⬅️ Назад':
                 self.waiting_for_broadcast = False
                 self.send_message(chat_id, "↩️ Главное меню", self.create_main_keyboard())
+            elif text == '📢 Рассылка всем' and is_admin:
+                self.waiting_for_broadcast = True
+                self.send_message(chat_id, "📝 *Введите текст сообщения для рассылки:*", self.create_back_keyboard())
+            
+            # РЕЖИМ РАССЫЛКИ
+            elif is_admin and self.waiting_for_broadcast:
+                self.waiting_for_broadcast = False
+                self.broadcast_message(text)
+                self.send_message(chat_id, "🚀 Рассылка завершена.", self.create_main_keyboard())
+
+            # ОБРАТНАЯ СВЯЗЬ (ЕСЛИ ПИШЕТ НЕ АДМИН И ЭТО НЕ КНОПКА)
+            elif not is_admin:
+                admin_msg = (
+                    f"📩 *Новое сообщение!*\n"
+                    f"От: {message['from'].get('first_name')} (@{username})\n"
+                    f"ID: `{user_id}`\n\n"
+                    f"💬 Текст: {text}\n\n"
+                    f"👉 Чтобы ответить: `/send {user_id} Ваш_текст`"
+                )
+                self.send_message(ADMIN, admin_msg)
+                self.send_message(chat_id, "✅ Ваше сообщение отправлено администратору.")
 
         except Exception as e:
-            logger.error(f"Ошибка обработки: {e}")
+            logger.error(f"Ошибка процесса: {e}")
 
     def handle_today(self, chat_id):
         date = datetime.now()
-        self.send_message(chat_id, f"🔍 Ищу на {date.strftime('%d.%m.%Y')}...")
-        if not self.send_pdf(chat_id, self.get_pdf_url(date)):
-            self.send_message(chat_id, "❌ Пока не опубликовано.")
+        if not self.send_pdf(chat_id, self.get_pdf_url(date)): self.send_message(chat_id, "❌ Пока не опубликовано.")
 
     def handle_tomorrow(self, chat_id):
         date = datetime.now() + timedelta(days=1)
-        self.send_message(chat_id, f"🔍 Ищу на {date.strftime('%d.%m.%Y')}...")
-        if not self.send_pdf(chat_id, self.get_pdf_url(date)):
-            self.send_message(chat_id, "📭 На завтра расписания еще нет.")
+        if not self.send_pdf(chat_id, self.get_pdf_url(date)): self.send_message(chat_id, "📭 Расписания на завтра еще нет.")
 
     def handle_check_updates(self, chat_id):
-        self.send_message(chat_id, "🔍 Проверяю сайт...")
         changes = self.check_for_updates()
         if changes:
-            self.send_message(chat_id, f"✅ Найдено новых: {len(changes)}")
             for c in changes: self.send_pdf(chat_id, c['url'])
-        else:
-            self.send_message(chat_id, "✅ У вас актуальное расписание.")
+        else: self.send_message(chat_id, "✅ У вас актуальное расписание.")
 
     def broadcast_message(self, text):
         cursor = self.conn.cursor()
         cursor.execute("SELECT user_id FROM users")
-        users = cursor.fetchall()
-        success, failed = 0, 0
-        for (u_id,) in users:
-            if self.send_message(u_id, text): success += 1
-            else: failed += 1
+        for (u_id,) in cursor.fetchall():
+            self.send_message(u_id, text)
             time.sleep(0.3)
-        return success, failed
 
     def check_for_updates(self):
         changes = []
@@ -285,30 +262,16 @@ class Button_URGT_Bot:
                         cursor.execute("INSERT INTO file_history (date, file_url, file_hash, file_size) VALUES (?,?,?,?)",
                                        (date_str, url, h, len(r.content)))
                         self.conn.commit()
-                        changes.append({'date': date_str, 'url': url})
+                        changes.append({'url': url})
             except: pass
         return changes
 
     def notify_all(self, changes):
         cursor = self.conn.cursor()
         cursor.execute("SELECT user_id FROM users WHERE notifications = 1")
-        users = cursor.fetchall()
-        for (u_id,) in users:
+        for (u_id,) in cursor.fetchall():
             self.send_message(u_id, "🔔 *Вышло новое расписание!*")
-            for c in changes: 
-                self.send_pdf(u_id, c['url'])
-                time.sleep(0.2)
-
-    def console_listener(self):
-        while self.running:
-            try:
-                cmd = input().strip()
-                if cmd.startswith("send:"):
-                    parts = cmd.split(":", 2)
-                    if len(parts) == 3:
-                        u_id, u_text = parts[1], parts[2]
-                        self.send_message(u_id, u_text)
-            except: pass
+            for c in changes: self.send_pdf(u_id, c['url'])
 
     def background_checker(self):
         while self.running:
@@ -320,7 +283,6 @@ class Button_URGT_Bot:
 
     def run(self):
         threading.Thread(target=self.background_checker, daemon=True).start()
-        threading.Thread(target=self.console_listener, daemon=True).start()
         while self.running:
             try:
                 r = requests.get(self.base_url + "getUpdates", params={'timeout': 30, 'offset': self.last_update_id + 1}, timeout=35)
@@ -329,7 +291,6 @@ class Button_URGT_Bot:
                         self.last_update_id = u['update_id']
                         if 'message' in u: self.process_message(u['message'])
                 time.sleep(0.2)
-            except KeyboardInterrupt: self.running = False
             except: time.sleep(5)
 
 if __name__ == "__main__":

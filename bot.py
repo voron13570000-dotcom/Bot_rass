@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-БОТ ДЛЯ РАСПИСАНИЯ УрЖДТ С КНОПОЧНЫМ МЕНЮ И РАССЫЛКОЙ
+БОТ ДЛЯ РАСПИСАНИЯ УрЖТ С КНОПОЧНЫМ МЕНЮ И РАССЫЛКОЙ
 """
 
 import requests
@@ -22,8 +22,8 @@ BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8"
 ADMIN = "M1pTAHKOB"  # Убедитесь, что это ваш username (без @) или ID
 
 # Настройки проверки
-CHECK_INTERVAL = 300# 30 минут
-MAX_DAYS_BACK = 7      # Проверять расписание на 7 дней вперед
+CHECK_INTERVAL = 300 # 5 минут (300 секунд)
+MAX_DAYS_BACK = 7    # Проверять расписание на 7 дней вперед
 
 # Настройка логирования
 logging.basicConfig(
@@ -45,7 +45,7 @@ class Button_URGT_Bot:
         self.waiting_for_broadcast = False  # Флаг для режима рассылки через ТГ
         
         logger.info("=" * 60)
-        logger.info("🤖 БОТ УрЖДТ С КНОПОЧНЫМ МЕНЮ")
+        logger.info("🤖 БОТ УрЖТ С КНОПОЧНЫМ МЕНЮ")
         logger.info("=" * 60)
     
     def init_db(self):
@@ -141,7 +141,7 @@ class Button_URGT_Bot:
                 url = self.base_url + "sendDocument"
                 with open(temp_file, "rb") as file:
                     files = {'document': file}
-                    data = {'chat_id': chat_id, 'caption': '📄 Расписание УрЖДТ'}
+                    data = {'chat_id': chat_id, 'caption': '📄 Расписание УрЖТ'}
                     requests.post(url, data=data, files=files, timeout=30)
                 if os.path.exists(temp_file): os.remove(temp_file)
                 return True
@@ -265,7 +265,7 @@ class Button_URGT_Bot:
         self.send_message(chat_id, f"👤 *Ваш ID:* `{user_id}`")
 
     def handle_help(self, chat_id):
-        self.send_message(chat_id, "ℹ️ Бот присылает расписание УрЖДТ в формате PDF.\nОбновления проверяются автоматически.")
+        self.send_message(chat_id, "ℹ️ Бот присылает расписание УрЖТ в формате PDF.\nОбновления проверяются автоматически.")
 
     def handle_check_updates(self, chat_id):
         self.send_message(chat_id, "🔍 Проверяю сайт...")
@@ -351,4 +351,3 @@ class Button_URGT_Bot:
 if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
-

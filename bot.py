@@ -18,7 +18,7 @@ import shutil
 
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8" 
-ADMIN = "M1pTAHKOB"  # Username без @ или ID
+ADMIN_USERNAME = "M1pTAHKOB"  # Ваш username без @
 
 CHECK_INTERVAL = 300 
 MAX_DAYS_BACK = 7    
@@ -42,7 +42,7 @@ class Button_URGT_Bot:
         self.waiting_for_broadcast = False 
         
         logger.info("=" * 60)
-        logger.info("🤖 БОТ УрЖТ С КНОПОЧНЫМ МЕНЮ")
+        logger.info("🤖 БОТ УрЖТ ЗАПУЩЕН")
         logger.info("=" * 60)
     
     def init_db(self):
@@ -99,7 +99,6 @@ class Button_URGT_Bot:
     def create_settings_keyboard(self, is_admin=False):
         buttons = [[{"text": "🔔 Вкл/Выкл уведомления"}]]
         if is_admin:
-            # Добавлена кнопка списка пользователей для админа
             buttons.append([{"text": "📢 Рассылка всем"}, {"text": "👥 Список пользователей"}])
         buttons.append([{"text": "📊 Статистика бота"}])
         buttons.append([{"text": "⬅️ Назад"}])
@@ -154,7 +153,7 @@ class Button_URGT_Bot:
     # ========== ОБРАБОТЧИКИ ==========
 
     def handle_settings(self, chat_id, user_id, username):
-        is_admin = str(user_id) == ADMIN or username == ADMIN.lstrip('@')
+        is_admin = username == ADMIN_USERNAME
         msg = "⚙️ *НАСТРОЙКИ БОТА*\n\nВыберите нужное действие ниже:"
         if is_admin: msg += "\n\n👑 *Меню администратора активно*"
         self.send_message(chat_id, msg, self.create_settings_keyboard(is_admin))
@@ -165,7 +164,7 @@ class Button_URGT_Bot:
             user_id = message['from']['id']
             username = message['from'].get('username', '')
             text = message.get('text', '').strip()
-            is_admin = str(user_id) == ADMIN or username == ADMIN.lstrip('@')
+            is_admin = username == ADMIN_USERNAME
 
             if is_admin and self.waiting_for_broadcast and text != '⬅️ Назад':
                 self.waiting_for_broadcast = False
@@ -210,44 +209,73 @@ class Button_URGT_Bot:
 
     # ========== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ==========
 
+    def handle_start(self, chat_id, user_info):
+        """Регистрация пользователя и уведомление админа о новом юзере"""
+        user_id = user_info['id']
+        username = user_info.get('username', '')
+        first_name = user_info.get('first_name', 'Без имени')
+        
+        cursor = self.conn.cursor()
+        # Проверяем, есть ли пользователь в базе
+        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        is_new = cursor.fetchone() is None
+        
+        # Сохраняем/обновляем данные
+        cursor.execute("""
+            INSERT OR REPLACE INTO users (user_id, username, first_name, last_name, last_active) 
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (user_id, username, first_name, user_info.get('last_name')))
+        self.conn.commit()
+        
+        self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
+
+        # Если пользователь новый — уведомляем админа
+        if is_new:
+            self.notify_admin_about_new_user(user_info)
+
+    def notify_admin_about_new_user(self, user_info):
+        """Поиск ID админа и отправка ему уведомления с обновленным списком"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE username = ?", (ADMIN_USERNAME,))
+        admin_data = cursor.fetchone()
+        
+        if admin_data:
+            admin_id = admin_data[0]
+            name = user_info.get('first_name', 'User')
+            uname = f"@{user_info.get('username')}" if user_info.get('username') else "нет"
+            
+            msg = f"🆕 *Новый пользователь!*\n👤 Имя: {name}\n🔗 Юзернейм: {uname}\n🆔 ID: `{user_info['id']}`"
+            self.send_message(admin_id, msg)
+            
+            # Сразу присылаем админу обновленный список
+            self.handle_user_list(admin_id)
+
     def handle_user_list(self, chat_id):
-        """Метод для просмотра списка пользователей админом"""
         try:
             cursor = self.conn.cursor()
-            # Берем последние 50 активных пользователей
-            cursor.execute("SELECT user_id, username, first_name FROM users ORDER BY last_active DESC LIMIT 50")
+            cursor.execute("SELECT user_id, username, first_name FROM users ORDER BY created DESC LIMIT 50")
             users = cursor.fetchall()
             
             if not users:
                 self.send_message(chat_id, "📭 Список пользователей пуст.")
                 return
 
-            response = "👥 *Последние активные пользователи:*\n\n"
+            response = "👥 *Последние пользователи (всего: " + str(len(users)) + "):*\n\n"
             for u_id, username, first_name in users:
                 user_info = f"@{username}" if username else f"[{first_name}](tg://user?id={u_id})"
                 response += f"• {user_info} (ID: `{u_id}`)\n"
             
             self.send_message(chat_id, response)
         except Exception as e:
-            logger.error(f"Ошибка получения списка: {e}")
-            self.send_message(chat_id, "❌ Не удалось загрузить список пользователей.")
+            logger.error(f"Ошибка списка: {e}")
 
     def handle_support(self, chat_id):
         support_text = (
             "❤️ *ПОДДЕРЖКА АВТОРА*\n\n"
-            "Если вам нравится этот бот и вы хотите поддержать его развитие, вы можете сделать перевод по реквизитам ниже:\n\n"
-            "💳 *Карта:* `2200 7014 1439 4772`\n"
-            "👤 *Автор:* @M1PTAHKOB\n\n"
-            "Спасибо за вашу поддержку! 🙏"
+            "Карта: `2200 7014 1439 4772`\n"
+            "Автор: @M1PTAHKOB"
         )
         self.send_message(chat_id, support_text)
-
-    def handle_start(self, chat_id, user_info):
-        cursor = self.conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO users (user_id, username, first_name, last_name, last_active) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
-                       (user_info['id'], user_info.get('username'), user_info.get('first_name'), user_info.get('last_name')))
-        self.conn.commit()
-        self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
 
     def handle_today(self, chat_id):
         date = datetime.now()
@@ -267,7 +295,7 @@ class Button_URGT_Bot:
         cursor = self.conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM users")
         count = cursor.fetchone()[0]
-        self.send_message(chat_id, f"📊 *Статистика*\n\nПользователей в базе: {count}")
+        self.send_message(chat_id, f"📊 *Статистика*\n\nВсего пользователей: {count}")
 
     def handle_toggle_notifications(self, chat_id, user_id):
         cursor = self.conn.cursor()
@@ -275,7 +303,7 @@ class Button_URGT_Bot:
         res = cursor.fetchone()
         if res:
             new_val = 0 if res[0] == 1 else 1
-            cursor.execute("UPDATE users SET notifications = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?", (new_val, user_id))
+            cursor.execute("UPDATE users SET notifications = ? WHERE user_id = ?", (new_val, user_id))
             self.conn.commit()
             status = "ВКЛЮЧЕНЫ" if new_val == 1 else "ВЫКЛЮЧЕНЫ"
             self.send_message(chat_id, f"🔔 Уведомления {status}")
@@ -284,7 +312,7 @@ class Button_URGT_Bot:
         self.send_message(chat_id, f"👤 *Ваш ID:* `{user_id}`")
 
     def handle_help(self, chat_id):
-        self.send_message(chat_id, "ℹ️ Бот присылает расписание УрЖТ в формате PDF.\nОбновления проверяются автоматически.")
+        self.send_message(chat_id, "ℹ️ Бот присылает расписание УрЖТ.\nОбновления проверяются автоматически.")
 
     def handle_check_updates(self, chat_id):
         self.send_message(chat_id, "🔍 Проверяю сайт...")
@@ -356,7 +384,7 @@ class Button_URGT_Bot:
 
     def run(self):
         threading.Thread(target=self.background_checker, daemon=True).start()
-        logger.info("📡 Бот запущен и ожидает сообщений...")
+        logger.info("📡 Бот запущен...")
         while self.running:
             try:
                 updates = self.get_updates()

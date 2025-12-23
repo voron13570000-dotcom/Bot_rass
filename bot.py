@@ -18,7 +18,7 @@ import sys
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8" 
 ADMIN = "7634746932" 
-TZ_EKATERINBURG = timezone(timedelta(hours=5)) # Часовой пояс Екатеринбурга (UTC+5)
+TZ_EKATERINBURG = timezone(timedelta(hours=5)) 
 
 CHECK_INTERVAL = 300
 MAX_DAYS_BACK = 7
@@ -132,7 +132,7 @@ class Button_URGT_Bot:
         day_of_week = now.weekday() 
         header = "🔔 *ЗВОНКИ УрЖТ (Екатеринбург)*\n"
 
-        if day_of_week == 0: # ПОНЕДЕЛЬНИК
+        if day_of_week == 0:
             bells_text = (
                 f"{header}📍 *Тип дня:* Понедельник\n\n"
                 "📢 `08:30 — 08:40` Линейка\n"
@@ -146,7 +146,7 @@ class Button_URGT_Bot:
                 "5️⃣ `17:20 — 18:55` 5-я пара\n"
                 "6️⃣ `19:05 — 20:40` 6-я пара"
             )
-        elif day_of_week == 5: # СУББОТА
+        elif day_of_week == 5:
             bells_text = (
                 f"{header}📍 *Тип дня:* Суббота\n\n"
                 "1️⃣ `09:00 — 10:35` 1-я пара\n"
@@ -155,7 +155,7 @@ class Button_URGT_Bot:
                 "3️⃣ `12:40 — 14:15` 3-я пара\n"
                 "4️⃣ `14:25 — 16:00` 4-я пара"
             )
-        else: # ВТОРНИК - ПЯТНИЦА
+        else:
             bells_text = (
                 f"{header}📍 *Тип дня:* Будни\n\n"
                 "1️⃣ `09:00 — 10:35` 1-я пара\n"
@@ -179,14 +179,20 @@ class Button_URGT_Bot:
 
             # --- АВТО-РЕГИСТРАЦИЯ ПРИ ЛЮБОМ ДЕЙСТВИИ ---
             cursor = self.conn.cursor()
-            cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
-            if not cursor.fetchone():
+            cursor.execute("SELECT notifications FROM users WHERE user_id = ?", (user_id,))
+            user_data = cursor.fetchone()
+            
+            if not user_data:
                 cursor.execute("INSERT INTO users (user_id, username, first_name) VALUES (?, ?, ?)",
                                (user_id, username, first_name))
                 self.conn.commit()
-                # Уведомляем админа, экранируя никнейм
                 safe_username = username.replace('_', '\\_') if username else "нет"
                 self.send_message(ADMIN, f"🆕 *Новый пользователь:* {first_name} (@{safe_username})\nID: `{user_id}`")
+                current_notifications = 1
+            else:
+                current_notifications = user_data[0]
+                cursor.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id = ?", (user_id,))
+                self.conn.commit()
 
             # АДМИН КОМАНДЫ
             if is_admin and text == '/users':
@@ -208,6 +214,14 @@ class Button_URGT_Bot:
             # КНОПКИ
             if text in ['/start', '/старт']:
                 self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
+            
+            elif text == '🔔 Вкл/Выкл уведомления':
+                new_status = 0 if current_notifications == 1 else 1
+                cursor.execute("UPDATE users SET notifications = ? WHERE user_id = ?", (new_status, user_id))
+                self.conn.commit()
+                status_text = "ВКЛЮЧЕНЫ ✅" if new_status == 1 else "ВЫКЛЮЧЕНЫ ❌"
+                self.send_message(chat_id, f"🔔 Уведомления теперь *{status_text}*")
+
             elif text == '📅 Сегодня': self.handle_today(chat_id)
             elif text == '📆 Завтра': self.handle_tomorrow(chat_id)
             elif text == '🔔 Расписание звонков': self.handle_bells(chat_id)
@@ -273,7 +287,6 @@ class Button_URGT_Bot:
                 if r.status_code == 200:
                     h = hashlib.md5(r.content).hexdigest()
                     cursor = self.conn.cursor()
-                    # Ищем именно эту комбинацию даты и хеша
                     cursor.execute("SELECT id FROM file_history WHERE date = ? AND file_hash = ?", (date.strftime("%Y-%m-%d"), h))
                     if not cursor.fetchone():
                         cursor.execute("INSERT INTO file_history (date, file_url, file_hash, file_size) VALUES (?,?,?,?)",

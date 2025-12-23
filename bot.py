@@ -97,12 +97,18 @@ class Button_URGT_Bot:
         try:
             response = requests.get(pdf_url, timeout=20)
             if response.status_code == 200:
+                # ИСПРАВЛЕНИЕ: Передаем имя файла, чтобы Telegram видел PDF
+                filename = pdf_url.split('/')[-1]
+                files = {'document': (filename, response.content)}
+                
                 requests.post(self.base_url + "sendDocument", 
                              data={'chat_id': chat_id, 'caption': '📄 Расписание УрЖТ'}, 
-                             files={'document': response.content}, timeout=30)
+                             files=files, timeout=30)
                 return True
             return False
-        except: return False
+        except Exception as e:
+            logger.error(f"Ошибка отправки PDF: {e}")
+            return False
 
     def get_pdf_url(self, target_date):
         date_str = target_date.strftime("%d%m%Y")
@@ -177,7 +183,6 @@ class Button_URGT_Bot:
             text = message.get('text', '').strip()
             is_admin = str(user_id) == str(ADMIN)
 
-            # --- АВТО-РЕГИСТРАЦИЯ ПРИ ЛЮБОМ ДЕЙСТВИИ ---
             cursor = self.conn.cursor()
             cursor.execute("SELECT notifications FROM users WHERE user_id = ?", (user_id,))
             user_data = cursor.fetchone()
@@ -194,7 +199,6 @@ class Button_URGT_Bot:
                 cursor.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id = ?", (user_id,))
                 self.conn.commit()
 
-            # АДМИН КОМАНДЫ
             if is_admin and text == '/users':
                 cursor.execute("SELECT user_id, username, first_name FROM users")
                 users_list = cursor.fetchall()
@@ -211,7 +215,6 @@ class Button_URGT_Bot:
                     self.send_message(parts[1], f"✉️ *Личное сообщение от администратора:*\n\n{parts[2]}")
                 return
 
-            # КНОПКИ
             if text in ['/start', '/старт']:
                 self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
             

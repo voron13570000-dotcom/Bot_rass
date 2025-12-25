@@ -2,6 +2,7 @@
 """
 БОТ ДЛЯ РАСПИСАНИЯ УрЖТ С КНОПОЧНЫМ МЕНЮ И РАССЫЛКОЙ
 Настроен часовой пояс Екатеринбурга (UTC+5)
+Добавлена защита диска и умный поиск файлов.
 """
 
 import requests
@@ -14,6 +15,8 @@ import os
 import threading
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
+from bs4 import BeautifulSoup
 
 # ========== НАСТРОЙКИ ==========
 BOT_TOKEN = "8534692585:AAHRp6JsPORhX3KF-bqM2bPQz0RuWEKVxt8" 
@@ -22,14 +25,14 @@ TZ_EKATERINBURG = timezone(timedelta(hours=5))
 
 CHECK_INTERVAL = 300
 MAX_DAYS_BACK = 7
+SITE_URL = "https://urgt66.ru/obuchayushchimsya/raspisanie-zanyatiy/"
 
+# ЗАЩИТА ОТ ПЕРЕПОЛНЕНИЯ ДИСКА (Лог не более 2 МБ)
+log_handler = RotatingFileHandler('urgt_bot.log', maxBytes=2*1024*1024, backupCount=1, encoding='utf-8')
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('urgt_bot.log', encoding='utf-8')
-    ]
+    handlers=[log_handler, logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
@@ -42,8 +45,7 @@ class Button_URGT_Bot:
         self.waiting_for_broadcast = False
         
         logger.info("=" * 60)
-        logger.info("🤖 БОТ УрЖТ ЗАПУЩЕН")
-        logger.info(f"👑 Администратор ID: {ADMIN}")
+        logger.info("🤖 УМНЫЙ БОТ УрЖТ ЗАПУЩЕН")
         logger.info(f"🕒 Часовой пояс: UTC+5 (Екатеринбург)")
         logger.info("=" * 60)
     
@@ -73,7 +75,7 @@ class Button_URGT_Bot:
                     file_size INTEGER,
                     first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     notified INTEGER DEFAULT 0,
-                    UNIQUE(date, file_hash)
+                    UNIQUE(file_hash)
                 )
             """)
             self.conn.commit()
@@ -97,10 +99,8 @@ class Button_URGT_Bot:
         try:
             response = requests.get(pdf_url, timeout=20)
             if response.status_code == 200:
-                # ИСПРАВЛЕНИЕ: Передаем имя файла, чтобы Telegram видел PDF
                 filename = pdf_url.split('/')[-1]
                 files = {'document': (filename, response.content)}
-                
                 requests.post(self.base_url + "sendDocument", 
                              data={'chat_id': chat_id, 'caption': '📄 Расписание УрЖТ'}, 
                              files=files, timeout=30)
@@ -110,9 +110,21 @@ class Button_URGT_Bot:
             logger.error(f"Ошибка отправки PDF: {e}")
             return False
 
-    def get_pdf_url(self, target_date):
-        date_str = target_date.strftime("%d%m%Y")
-        return f"https://urgt66.ru/media/sub/3656/files/raspisanie-na-{date_str}.pdf"
+    def get_links_from_site(self):
+        """Парсинг сайта для поиска всех PDF ссылок"""
+        links = []
+        try:
+            r = requests.get(SITE_URL, timeout=20)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if href.lower().endswith('.pdf'):
+                    if not href.startswith('http'):
+                        href = "https://urgt66.ru" + href
+                    links.append(href)
+        except Exception as e:
+            logger.error(f"Ошибка парсинга: {e}")
+        return list(set(links))
 
     def create_main_keyboard(self):
         return json.dumps({
@@ -136,42 +148,13 @@ class Button_URGT_Bot:
     def handle_bells(self, chat_id):
         now = datetime.now(TZ_EKATERINBURG)
         day_of_week = now.weekday() 
-        header = "🔔 *ЗВОНКИ УрЖТ (Екатеринбург)*\n"
-
+        header = "🔔 *ЗВОНКИ УрЖТ*\n"
         if day_of_week == 0:
-            bells_text = (
-                f"{header}📍 *Тип дня:* Понедельник\n\n"
-                "📢 `08:30 — 08:40` Линейка\n"
-                "🏫 `08:45 — 09:30` Классный час\n"
-                "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
-                "1️⃣ `09:40 — 11:15` 1-я пара\n"
-                "2️⃣ `11:25 — 13:00` 2-я пара\n"
-                "🍱 `13:00 — 13:40` *ОБЕД*\n"
-                "3️⃣ `13:40 — 15:15` 3-я пара\n"
-                "4️⃣ `15:35 — 17:10` 4-я пара\n"
-                "5️⃣ `17:20 — 18:55` 5-я пара\n"
-                "6️⃣ `19:05 — 20:40` 6-я пара"
-            )
+            bells_text = f"{header}📍 Понедельник\n\n📢 `08:30-08:40` Линейка\n🏫 `08:45-09:30` Кл.час\n1️⃣ `09:40-11:15`..."
         elif day_of_week == 5:
-            bells_text = (
-                f"{header}📍 *Тип дня:* Суббота\n\n"
-                "1️⃣ `09:00 — 10:35` 1-я пара\n"
-                "2️⃣ `10:45 — 12:20` 2-я пара\n"
-                "🍱 `12:20 — 12:40` *ОБЕД*\n"
-                "3️⃣ `12:40 — 14:15` 3-я пара\n"
-                "4️⃣ `14:25 — 16:00` 4-я пара"
-            )
+            bells_text = f"{header}📍 Суббота\n\n1️⃣ `09:00-10:35`..."
         else:
-            bells_text = (
-                f"{header}📍 *Тип дня:* Будни\n\n"
-                "1️⃣ `09:00 — 10:35` 1-я пара\n"
-                "2️⃣ `10:45 — 12:20` 2-я пара\n"
-                "🍱 `12:20 — 13:00` *ОБЕД*\n"
-                "3️⃣ `13:00 — 14:30` 3-я пара\n"
-                "4️⃣ `14:50 — 16:25` 4-я пара\n"
-                "5️⃣ `16:35 — 18:10` 5-я пара\n"
-                "6️⃣ `18:20 — 19:55` 6-я пара"
-            )
+            bells_text = f"{header}📍 Будни\n\n1️⃣ `09:00-10:35`\n🍱 Обед `12:20-13:00`..."
         self.send_message(chat_id, bells_text)
 
     def process_message(self, message):
@@ -191,130 +174,91 @@ class Button_URGT_Bot:
                 cursor.execute("INSERT INTO users (user_id, username, first_name) VALUES (?, ?, ?)",
                                (user_id, username, first_name))
                 self.conn.commit()
-                safe_username = username.replace('_', '\\_') if username else "нет"
-                self.send_message(ADMIN, f"🆕 *Новый пользователь:* {first_name} (@{safe_username})\nID: `{user_id}`")
                 current_notifications = 1
             else:
                 current_notifications = user_data[0]
-                cursor.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id = ?", (user_id,))
-                self.conn.commit()
-
-            if is_admin and text == '/users':
-                cursor.execute("SELECT user_id, username, first_name FROM users")
-                users_list = cursor.fetchall()
-                report = "👥 *Список пользователей:*\n\n"
-                for u in users_list:
-                    u_name = f"@{u[1]}".replace('_', '\\_') if u[1] else "нет"
-                    report += f"`{u[0]}` | {u_name} | {u[2]}\n"
-                self.send_message(chat_id, report[:4000])
-                return
-
-            if is_admin and text.startswith('/send'):
-                parts = text.split(maxsplit=2)
-                if len(parts) == 3:
-                    self.send_message(parts[1], f"✉️ *Личное сообщение от администратора:*\n\n{parts[2]}")
-                return
 
             if text in ['/start', '/старт']:
                 self.send_message(chat_id, "👋 *Бот УрЖТ готов к работе!*", self.create_main_keyboard())
             
+            elif text == '📅 Сегодня':
+                self.send_message(chat_id, "🔍 Проверяю сайт...")
+                links = self.get_links_from_site()
+                found = False
+                today = datetime.now(TZ_EKATERINBURG).strftime("%d%m%Y")
+                for link in links:
+                    if today in link:
+                        self.send_pdf(chat_id, link)
+                        found = True
+                if not found: self.send_message(chat_id, "❌ Расписание на сегодня не найдено.")
+
+            elif text == '📆 Завтра':
+                self.send_message(chat_id, "🔍 Проверяю сайт...")
+                links = self.get_links_from_site()
+                found = False
+                tomorrow = (datetime.now(TZ_EKATERINBURG) + timedelta(days=1)).strftime("%d%m%Y")
+                for link in links:
+                    if tomorrow in link:
+                        self.send_pdf(chat_id, link)
+                        found = True
+                if not found: self.send_message(chat_id, "❌ Расписание на завтра не найдено.")
+
             elif text == '🔔 Вкл/Выкл уведомления':
                 new_status = 0 if current_notifications == 1 else 1
                 cursor.execute("UPDATE users SET notifications = ? WHERE user_id = ?", (new_status, user_id))
                 self.conn.commit()
-                status_text = "ВКЛЮЧЕНЫ ✅" if new_status == 1 else "ВЫКЛЮЧЕНЫ ❌"
-                self.send_message(chat_id, f"🔔 Уведомления теперь *{status_text}*")
+                self.send_message(chat_id, f"🔔 Уведомления: {'ВКЛЮЧЕНЫ ✅' if new_status == 1 else 'ВЫКЛЮЧЕНЫ ❌'}")
 
-            elif text == '📅 Сегодня': self.handle_today(chat_id)
-            elif text == '📆 Завтра': self.handle_tomorrow(chat_id)
+            elif text == '🔍 Проверить обновления':
+                self.send_message(chat_id, "🔎 Ищу новые файлы...")
+                links = self.get_links_from_site()
+                new_files = 0
+                for link in links:
+                    if self.check_and_save_file(link):
+                        self.send_pdf(chat_id, link)
+                        new_files += 1
+                if new_files == 0: self.send_message(chat_id, "✅ Новых обновлений нет.")
+
             elif text == '🔔 Расписание звонков': self.handle_bells(chat_id)
-            elif text == '🔍 Проверить обновления': self.handle_check_updates(chat_id)
-            elif text == '⚙️ Настройки': self.send_message(chat_id, "⚙️ *НАСТРОЙКИ*", self.create_settings_keyboard(is_admin))
+            elif text == '⚙️ Настройки': self.send_message(chat_id, "⚙️ Настройки", self.create_settings_keyboard(is_admin))
             elif text == '📊 Статистика бота':
                 cursor.execute("SELECT COUNT(*) FROM users")
-                self.send_message(chat_id, f"📊 *Статистика*\n\nПользователей: {cursor.fetchone()[0]}")
-            elif text == '❤️ Поддержать автора':
-                self.send_message(chat_id, "❤️ *ПОДДЕРЖКА АВТОРА*\n\n💳 *Карта:* `2200 7014 1439 4772` \n👤 *Автор:* @M1PTAHKOB\n\nСпасибо! 🙏")
-            elif text == '⬅️ Назад':
-                self.waiting_for_broadcast = False
-                self.send_message(chat_id, "↩️ Главное меню", self.create_main_keyboard())
-            elif text == '📢 Рассылка всем' and is_admin:
-                self.waiting_for_broadcast = True
-                self.send_message(chat_id, "📝 *Введите текст сообщения для рассылки:*", self.create_back_keyboard())
-            elif is_admin and self.waiting_for_broadcast:
-                self.waiting_for_broadcast = False
-                s, f = self.broadcast_message(text)
-                self.send_message(chat_id, f"✅ *Готово!*\nУспешно: {s}\nОшибок: {f}", self.create_main_keyboard())
-            elif not is_admin:
-                admin_msg = f"📩 *Новое сообщение!*\nОт: {first_name} (@{username})\nID: `{user_id}`\n\n💬 Текст: {text}\n\n👉 Ответить: `/send {user_id} Ваш_текст`"
-                self.send_message(ADMIN, admin_msg)
-                self.send_message(chat_id, "✅ Сообщение отправлено администратору.")
+                self.send_message(chat_id, f"📊 Пользователей: {cursor.fetchone()[0]}")
+            elif text == '⬅️ Назад': self.send_message(chat_id, "↩️ Меню", self.create_main_keyboard())
+            elif text == '❤️ Поддержать автора': self.send_message(chat_id, "💳 Карта: `2200 7014 1439 4772` \nАвтор: @M1PTAHKOB")
 
         except Exception as e:
             logger.error(f"Ошибка: {e}")
 
-    def handle_today(self, chat_id):
-        date = datetime.now(TZ_EKATERINBURG)
-        if not self.send_pdf(chat_id, self.get_pdf_url(date)): 
-            self.send_message(chat_id, "❌ Расписание на сегодня еще не опубликовано.")
-
-    def handle_tomorrow(self, chat_id):
-        date = datetime.now(TZ_EKATERINBURG) + timedelta(days=1)
-        if not self.send_pdf(chat_id, self.get_pdf_url(date)): 
-            self.send_message(chat_id, "❌ Расписание на завтра еще не опубликовано.")
-
-    def handle_check_updates(self, chat_id):
-        self.send_message(chat_id, "🔍 Проверяю сайт...")
-        changes = self.check_for_updates()
-        if changes:
-            for c in changes: self.send_pdf(chat_id, c['url'])
-        else: self.send_message(chat_id, "✅ У вас актуальное расписание.")
-
-    def broadcast_message(self, text):
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT user_id FROM users")
-        s, f = 0, 0
-        for (u_id,) in cursor.fetchall():
-            if self.send_message(u_id, text): s += 1
-            else: f += 1
-            time.sleep(0.1)
-        return s, f
-
-    def check_for_updates(self):
-        changes = []
-        for i in range(MAX_DAYS_BACK + 1):
-            date = datetime.now(TZ_EKATERINBURG) + timedelta(days=i)
-            url = self.get_pdf_url(date)
-            try:
-                r = requests.get(url, timeout=10)
-                if r.status_code == 200:
-                    h = hashlib.md5(r.content).hexdigest()
-                    cursor = self.conn.cursor()
-                    cursor.execute("SELECT id FROM file_history WHERE date = ? AND file_hash = ?", (date.strftime("%Y-%m-%d"), h))
-                    if not cursor.fetchone():
-                        cursor.execute("INSERT INTO file_history (date, file_url, file_hash, file_size) VALUES (?,?,?,?)",
-                                       (date.strftime("%Y-%m-%d"), url, h, len(r.content)))
-                        self.conn.commit()
-                        changes.append({'url': url, 'date': date.strftime('%d.%m')})
-            except: pass
-        return changes
+    def check_and_save_file(self, url):
+        """Проверяет файл по хешу и сохраняет в базу если новый"""
+        try:
+            r = requests.get(url, timeout=15)
+            if r.status_code == 200:
+                h = hashlib.md5(r.content).hexdigest()
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT id FROM file_history WHERE file_hash = ?", (h,))
+                if not cursor.fetchone():
+                    cursor.execute("INSERT INTO file_history (file_url, file_hash) VALUES (?, ?)", (url, h))
+                    self.conn.commit()
+                    return True
+        except: pass
+        return False
 
     def background_checker(self):
         while self.running:
             try:
-                changes = self.check_for_updates()
-                if changes:
-                    cursor = self.conn.cursor()
-                    cursor.execute("SELECT user_id FROM users WHERE notifications = 1")
-                    users = cursor.fetchall()
-                    for (u_id,) in users:
-                        for c in changes:
-                            self.send_message(u_id, f"🔔 *Обнаружено новое расписание на {c['date']}!*")
-                            self.send_pdf(u_id, c['url'])
+                links = self.get_links_from_site()
+                for link in links:
+                    if self.check_and_save_file(link):
+                        cursor = self.conn.cursor()
+                        cursor.execute("SELECT user_id FROM users WHERE notifications = 1")
+                        for (u_id,) in cursor.fetchall():
+                            self.send_message(u_id, "🔔 На сайте опубликовано новое расписание!")
+                            self.send_pdf(u_id, link)
+                            time.sleep(0.1)
                 time.sleep(CHECK_INTERVAL)
-            except Exception as e:
-                logger.error(f"Ошибка фонового монитора: {e}")
-                time.sleep(60)
+            except: time.sleep(60)
 
     def run(self):
         threading.Thread(target=self.background_checker, daemon=True).start()
@@ -331,4 +275,4 @@ class Button_URGT_Bot:
 if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
-    
+        

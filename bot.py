@@ -246,8 +246,17 @@ class Button_URGT_Bot:
                     self.last_update_id = u['update_id']
                     if 'message' in u: self.process_message(u['message'])
             except: time.sleep(5)
-
+                
+    def get_pdf_urls(self, target_date):
+        date_str = target_date.strftime("%d%m%Y")
+        return [
+            f"https://urgt66.ru/media/sub/3656/files/izmenenie-raspisanie-zanyatij-na-{date_str}-goda.pdf",
+            f"https://urgt66.ru/media/sub/3656/files/izmeneniya-raspisanie-zanyatij-na-{date_str}-goda.pdf",
+            f"https://urgt66.ru/media/sub/3656/files/raspisanie-na-{date_str}.pdf"
+        ]
+        
 if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
     
+

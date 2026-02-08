@@ -124,30 +124,40 @@ class Button_URGT_Bot:
         cursor.execute("UPDATE users SET username = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?", (message['from'].get('username'), user_id))
         self.conn.commit()
 
-        # --- АДМИН КОМАНДА /USERS ---
-        if text == '/users':
-            if not is_admin:
-                logger.warning(f"🚫 Отказано в доступе. UserID: {user_id} не равен ADMIN: {ADMIN}")
-                return
+                    # --- ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ БЛОК /USERS ---
+            if is_admin and text == '/users':
+                try:
+                    cursor.execute("SELECT user_id, username, first_name FROM users")
+                    users_list = cursor.fetchall()
+                    
+                    if not users_list:
+                        self.send_message(chat_id, "👥 База пользователей пока пуста.")
+                        return
 
-            cursor.execute("SELECT user_id, username, first_name, notifications FROM users")
-            users = cursor.fetchall()
-            if not users:
-                self.send_message(chat_id, "👥 База пользователей пуста.")
-                return
-
-            report = f"👥 *Пользователи ({len(users)}):*\n\n"
-            for u in users:
-                u_id, u_name, f_name, notify = u
-                status = "🔔" if notify == 1 else "🔕"
-                u_link = f"@{u_name}" if u_name else "скрыт"
-                line = f"• {f_name} ({u_link}) | `{u_id}` | {status}\n"
-                if len(report) + len(line) > 4000:
+                    report = f"👥 *Список пользователей ({len(users_list)}):*\n\n"
+                    
+                    for u in users_list:
+                        u_id = u[0]
+                        # Экранируем нижнее подчеркивание, чтобы Markdown не ломался
+                        u_name = f"@{u[1]}".replace('_', '\\_') if u[1] else "нет"
+                        f_name = str(u[2]).replace('_', '\\_').replace('*', '')
+                        
+                        line = f"`{u_id}` | {u_name} | {f_name}\n"
+                        
+                        # Если сообщение становится слишком длинным, отправляем часть и начинаем новую
+                        if len(report) + len(line) > 3900:
+                            self.send_message(chat_id, report)
+                            report = "👥 *Продолжение списка:*\n\n"
+                        
+                        report += line
+                    
                     self.send_message(chat_id, report)
-                    report = ""
-                report += line
-            self.send_message(chat_id, report)
-            return
+                    return
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка вывода списка: {e}")
+                    self.send_message(chat_id, f"❌ Ошибка при формировании списка: {e}")
+                return
 
         # --- ОБЫЧНОЕ МЕНЮ ---
         if text in ['/start', '⬅️ Назад']:
@@ -217,3 +227,4 @@ if __name__ == "__main__":
     bot = Button_URGT_Bot()
     bot.run()
     
+

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 БОТ ДЛЯ РАСПИСАНИЯ УрЖТ
-Версия: 2.3 (Максимальная защита от смены названий файлов)
+Версия: 2.5 (Полная интеграция админ-панели и удаление лишних кнопок)
 """
 
 import requests
@@ -40,8 +40,7 @@ class Button_URGT_Bot:
         self.init_db()
         self.last_update_id = 0
         self.running = True
-        self.waiting_for_broadcast = False
-        logger.info("🤖 Бот запущен. Система адаптивного поиска включена.")
+        logger.info("🤖 Бот запущен. Кнопки 'Помощь' и 'Профиль' удалены. Админ-команды активны.")
     
     def init_db(self):
         os.makedirs("data", exist_ok=True)
@@ -52,9 +51,7 @@ class Button_URGT_Bot:
         self.conn.commit()
 
     def get_pdf_urls(self, target_date):
-        """Генерирует все возможные вариации ссылок, если админ изменит название"""
         date_str = target_date.strftime("%d%m%Y")
-        # Список шаблонов, которые чаще всего использует колледж
         templates = [
             f"izmenenie-raspisanie-zanyatij-na-{date_str}-goda.pdf",
             f"izmeneniya-raspisanie-zanyatij-na-{date_str}-goda.pdf",
@@ -89,26 +86,21 @@ class Button_URGT_Bot:
             return False
 
     def _fetch_any(self, chat_id, date, day_text):
-        """Пробует все варианты ссылок для конкретной даты"""
         urls = self.get_pdf_urls(date)
         for url in urls:
-            logger.info(f"Проверка: {url}")
             if self.send_pdf(chat_id, url):
                 return True
         self.send_message(chat_id, f"❌ Расписание {day_text} ({date.strftime('%d.%m')}) пока не найдено.")
         return False
 
     def check_for_updates(self):
-        """Автоматический поиск новых файлов на будущие дни"""
         found_count = 0
         for i in range(MAX_DAYS_BACK + 1):
             date = datetime.now(TZ_EKATERINBURG) + timedelta(days=i)
             for url in self.get_pdf_urls(date):
                 try:
-                    # Сначала проверяем HEAD запросом (быстро)
                     r = requests.head(url, headers=HEADERS, timeout=5)
                     if r.status_code == 200:
-                        # Если файл есть, проверяем его хеш, чтобы не слать дубликаты
                         r_full = requests.get(url, headers=HEADERS, timeout=10)
                         h = hashlib.md5(r_full.content[:2048]).hexdigest()
                         
@@ -117,10 +109,9 @@ class Button_URGT_Bot:
                         if not cursor.fetchone():
                             cursor.execute("INSERT INTO file_history (date, file_url, file_hash) VALUES (?,?,?)", (date.strftime("%Y-%m-%d"), url, h))
                             self.conn.commit()
-                            logger.info(f"🔔 Найдено новое расписание на {date.strftime('%d.%m')}!")
                             self.broadcast_new(url, date.strftime("%d.%m"))
                             found_count += 1
-                            break # Нашли один вариант для этой даты — переходим к следующему дню
+                            break 
                 except: continue
         return found_count > 0
 
@@ -132,6 +123,7 @@ class Button_URGT_Bot:
             self.send_pdf(u_id, url)
 
     def process_message(self, message):
+        if 'chat' not in message or 'from' not in message: return
         chat_id = message['chat']['id']
         user_id = message['from']['id']
         text = message.get('text', '').strip()
@@ -142,14 +134,27 @@ class Button_URGT_Bot:
         cursor.execute("UPDATE users SET username = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?", (message['from'].get('username'), user_id))
         self.conn.commit()
 
+        # --- БЛОК АДМИНИСТРАТОРА (/users) ---
         if is_admin and text == '/users':
-            cursor.execute("SELECT user_id, username, first_name FROM users")
-            report = "👥 *Список пользователей:*\n\n"
-            for u in cursor.fetchall():
-                report += f"`{u[0]}` | @{u[1] if u[1] else 'нет'} | {u[2]}\n"
-            self.send_message(chat_id, report[:4000])
+            cursor.execute("SELECT user_id, username, first_name, notifications FROM users")
+            users = cursor.fetchall()
+            if not users:
+                self.send_message(chat_id, "👥 В базе данных пока нет пользователей.")
+                return
+            report = f"👥 *Список пользователей ({len(users)}):*\n\n"
+            for u in users:
+                u_id, u_name, f_name, notify = u
+                status = "🔔" if notify == 1 else "🔕"
+                username = f"@{u_name}" if u_name else "скрыт"
+                line = f"👤 {f_name} ({username})\n└ ID: `{u_id}` | {status}\n\n"
+                if len(report) + len(line) > 4000:
+                    self.send_message(chat_id, report)
+                    report = ""
+                report += line
+            self.send_message(chat_id, report)
             return
 
+        # --- ОБЫЧНЫЕ КОМАНДЫ ---
         if text in ['/start', '⬅️ Назад']:
             self.send_message(chat_id, "👋 Выберите действие:", self.create_main_keyboard())
         
@@ -160,17 +165,17 @@ class Button_URGT_Bot:
             self._fetch_any(chat_id, datetime.now(TZ_EKATERINBURG) + timedelta(days=1), "на завтра")
 
         elif text == '🔍 Проверить обновления':
-            self.send_message(chat_id, "🔎 Проверяю сайт УрЖТ на наличие новых файлов...")
+            self.send_message(chat_id, "🔎 Проверяю сайт УрЖТ...")
             if not self.check_for_updates(): 
-                self.send_message(chat_id, "✅ Новых файлов на ближайшую неделю не обнаружено.")
+                self.send_message(chat_id, "✅ Новых файлов не найдено.")
 
         elif text == '⚙️ Настройки':
-            self.send_message(chat_id, "⚙️ Настройки", self.create_settings_keyboard(is_admin))
+            self.send_message(chat_id, "⚙️ Настройки:", self.create_settings_keyboard(is_admin))
 
         elif text == '📊 Статистика бота' and is_admin:
             cursor.execute("SELECT COUNT(*) FROM users")
             u_count = cursor.fetchone()[0]
-            self.send_message(chat_id, f"📊 *СТАТИСТИКА*\n👤 Пользователей: `{u_count}`")
+            self.send_message(chat_id, f"📊 *СТАТИСТИКА*\n👤 Пользователей в базе: `{u_count}`")
 
         elif text == '🔔 Вкл/Выкл уведомления':
             cursor.execute("UPDATE users SET notifications = 1 - notifications WHERE user_id = ?", (user_id,))
@@ -178,7 +183,7 @@ class Button_URGT_Bot:
             self.send_message(chat_id, "🔔 Статус уведомлений изменен!")
 
         elif text == '🔔 Расписание звонков':
-            msg = "🔔 *Расписание звонков*\n\nБудни:\n1 пара: 09:00 - 10:35\n2 пара: 10:45 - 12:20\n3 пара: 13:00 - 14:35"
+            msg = "🔔 *Расписание звонков*\n\n1 пара: 09:00 - 10:35\n2 пара: 10:45 - 12:20\n3 пара: 13:00 - 14:35"
             self.send_message(chat_id, msg)
 
     def create_main_keyboard(self):
@@ -191,7 +196,6 @@ class Button_URGT_Bot:
         return json.dumps({"keyboard": btns, "resize_keyboard": True})
 
     def run(self):
-        # Фоновый поток для авто-проверки обновлений
         threading.Thread(target=self.background_checker, daemon=True).start()
         while self.running:
             try:
